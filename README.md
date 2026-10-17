@@ -2,6 +2,7 @@
 
 Paper-first Forex trading engine for **EURUSD** / **USDJPY** (H1 entry, H4 trend).  
 **M6:** Orchestrator H1 cycle + Telegram alerts + heartbeat/`system_events`.  
+**M7:** Read-only ops [dashboard](./dashboard/) (Next.js) — decisions / trades / events + kill switch; Vercel deploy for **ght.systems**.  
 Default **`MODE=paper`** — no live trading; LLM defaults to **mock** (no API keys required in CI).
 
 Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/AutotraderGHTsystems)
@@ -15,6 +16,7 @@ Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/
 - Strategy Engine creates **candidate entries in code only** — AI filters/sizes; it does not invent signals.
 - Agents propose only; **Risk Engine (code) is authority**. Agent 3 cannot raise risk ceilings.
 - Telegram alerts soft-fail: if Telegram is down, the cycle **logs and continues** (never hard-fails).
+- Web dashboard is **read-only + kill switch** — **no** place-order / execution endpoints; the Python engine remains source of truth for MT5.
 - Broker credentials and API keys live only in a local `.env` on the Windows PC (or later Windows VPS) — never in chat or git.
 - MetaTrader5 Python package + terminal require **Windows**. Cloud Linux / CI uses the **mock** data backend, **mock** LLM, and **paper** execution (no MT5 `order_send`).
 
@@ -302,9 +304,24 @@ The live MT5 **data** path only works on a **Windows** machine with the Exness M
 
 See also project docs: local-run rules (pre-VPS) and project context in the Cursor project store.
 
+## Ops dashboard (M7)
+
+Read-only Next.js app under [`dashboard/`](./dashboard/) — demo journal data on Vercel (SQLite does not persist on serverless) + password gate + kill-switch POST. Full run/deploy notes: [`dashboard/README.md`](./dashboard/README.md).
+
+```bash
+cd dashboard
+npm install
+npm run build
+npm run test:smoke
+npm run dev   # http://localhost:3000
+```
+
+Env: `DASHBOARD_PASSWORD`, `DASHBOARD_DATA_MODE=demo|api` (see `dashboard/.env.example`). Domain intent: **ght.systems** on Vercel (Root Directory = `dashboard`).
+
 ## Layout
 
 ```
+dashboard/                  # M7 Next.js ops UI (Vercel root directory)
 config/config.yaml          # non-secret defaults (risk, symbols, active_window, llm, database)
 src/autotrader/
   active_window.py          # is_within_active_window(now)
