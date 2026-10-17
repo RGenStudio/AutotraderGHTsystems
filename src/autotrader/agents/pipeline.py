@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -36,9 +37,10 @@ class PipelineResult:
 
 class AgentPipeline:
     """
-    Run Agents 1→2→3→4 for a Strategy Engine candidate.
+    Run Agents 1∥2 → 3 → 4 for a Strategy Engine candidate.
 
     Hard rules:
+    - Agents 1 and 2 run in parallel when ``parallel_12`` is True (M6 default).
     - Any LLM / schema failure ⇒ ``trade_allowed=False`` (do not trade).
     - Agent 2 ``no_trade_news`` ⇒ skip Decision Maker enter (no trade).
     - Agent 4 invalid / skip ⇒ no trade.
@@ -53,9 +55,11 @@ class AgentPipeline:
         config: AppConfig | None = None,
         calendar: NewsCalendarProvider | None = None,
         calendar_url: str | None = None,
+        parallel_12: bool = True,
     ) -> None:
         self.config = config or load_config()
         self.journal = journal
+        self.parallel_12 = parallel_12
         models = self.config.llm.models
         self.technical = TechnicalAnalystAgent(
             client, model=models.technical, journal=journal
@@ -90,10 +94,14 @@ class AgentPipeline:
         call_ids: list[int] = []
         errors: list[str] = []
 
-        # Agents 1 and 2 — conceptually parallel; sequential is fine for M5.
-        tech_out = self.technical.analyze(context, decision_id=decision_id)
+        tech_out, news_out = self._run_agents_1_and_2(
+            context, now=now, symbol=symbol, decision_id=decision_id
+        )
         if tech_out.agent_call_id is not None:
             call_ids.append(tech_out.agent_call_id)
+        if news_out.agent_call_id is not None:
+            call_ids.append(news_out.agent_call_id)
+
         if not tech_out.ok:
             errors.append(f"technical: {tech_out.error or 'failed'}")
             return self._no_trade(
@@ -101,15 +109,9 @@ class AgentPipeline:
                 call_ids,
                 errors,
                 technical=None,
-                news=None,
+                news=news_out.parsed if news_out.ok else None,
                 risk_manager=None,
             )
-
-        news_out = self.news.analyze(
-            context, now=now, symbol=symbol, decision_id=decision_id
-        )
-        if news_out.agent_call_id is not None:
-            call_ids.append(news_out.agent_call_id)
         if not news_out.ok:
             errors.append(f"news: {news_out.error or 'failed'}")
             return self._no_trade(
@@ -135,7 +137,7 @@ class AgentPipeline:
                 news=news_out.parsed,
                 risk_manager=None,
                 errors=(),
-                meta={"no_trade_news": True},
+                meta={"no_trade_news": True, "parallel_12": self.parallel_12},
             )
 
         risk_out = self.risk_manager.propose(
@@ -194,6 +196,7 @@ class AgentPipeline:
                 news=news_out.parsed,
                 risk_manager=risk_out.parsed,
                 errors=(),
+                meta={"parallel_12": self.parallel_12},
             )
 
         payload = decision.to_risk_payload(idempotency_key=idempotency_key)
@@ -207,7 +210,35 @@ class AgentPipeline:
             news=news_out.parsed,
             risk_manager=risk_out.parsed,
             errors=(),
+            meta={"parallel_12": self.parallel_12},
         )
+
+    def _run_agents_1_and_2(
+        self,
+        context: dict[str, Any],
+        *,
+        now: datetime,
+        symbol: str,
+        decision_id: int | None,
+    ) -> tuple[Any, Any]:
+        """Run Technical + News in parallel (or sequentially when disabled)."""
+        if not self.parallel_12:
+            tech_out = self.technical.analyze(context, decision_id=decision_id)
+            news_out = self.news.analyze(
+                context, now=now, symbol=symbol, decision_id=decision_id
+            )
+            return tech_out, news_out
+
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="agent12") as pool:
+            fut_tech = pool.submit(self.technical.analyze, context, decision_id=decision_id)
+            fut_news = pool.submit(
+                self.news.analyze,
+                context,
+                now=now,
+                symbol=symbol,
+                decision_id=decision_id,
+            )
+            return fut_tech.result(), fut_news.result()
 
     @staticmethod
     def _no_trade(
@@ -240,8 +271,9 @@ def build_agent_pipeline(
     calendar_url: str | None = None,
     client: LLMClient | None = None,
     config: AppConfig | None = None,
+    parallel_12: bool = True,
 ) -> AgentPipeline:
-    """Factory used by tests / future orchestrator (M6). Default = mock LLM."""
+    """Factory used by tests / orchestrator (M6). Default = mock LLM."""
     cfg = config or load_config()
     llm = client or create_llm_client(force_mock=force_mock)
     return AgentPipeline(
@@ -250,4 +282,5 @@ def build_agent_pipeline(
         config=cfg,
         calendar=calendar,
         calendar_url=calendar_url,
+        parallel_12=parallel_12,
     )

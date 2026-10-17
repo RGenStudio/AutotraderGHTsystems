@@ -78,7 +78,9 @@ def _pipeline_with_queue(
     journal,
     *responses: object,
     calendar: StubNewsCalendar | None = None,
+    parallel_12: bool = False,
 ) -> AgentPipeline:
+    # FIFO queue is order-racy under parallel 1∥2 — keep sequential for queue tests.
     backend = MockLLMBackend()
     backend.enqueue(*responses)
     client = LLMClient(backend, timeout_s=5)
@@ -86,6 +88,7 @@ def _pipeline_with_queue(
         client,
         journal=journal,
         calendar=calendar or StubNewsCalendar(events=[]),
+        parallel_12=parallel_12,
     )
 
 
@@ -150,10 +153,12 @@ def test_bad_json_from_agent4_no_trade(journal) -> None:
 def test_llm_fail_on_agent1_no_trade(journal) -> None:
     backend = MockLLMBackend()
     backend.fail_with = RuntimeError("provider down")
+    # Parallel 1∥2: both may record a failed call when the provider is down.
     pipe = AgentPipeline(
         LLMClient(backend),
         journal=journal,
         calendar=StubNewsCalendar(events=[]),
+        parallel_12=True,
     )
     result = pipe.run(
         {"symbol": "EURUSD"},
@@ -163,8 +168,8 @@ def test_llm_fail_on_agent1_no_trade(journal) -> None:
     assert not result.trade_allowed
     assert result.reason == "llm_or_schema_fail"
     calls = journal.query_agent_calls()
-    assert len(calls) == 1
-    assert calls[0].success is False
+    assert len(calls) >= 1
+    assert all(c.success is False for c in calls)
 
 
 def test_news_blackout_blocks_trade(journal) -> None:

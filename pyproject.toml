@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autotrader"
-version = "0.5.0"
-description = "AutoTrader — paper-first Forex engine (M5 LLMClient + Agents 1–4)"
+version = "0.6.0"
+description = "AutoTrader — paper-first Forex engine (M6 orchestrator + Telegram)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

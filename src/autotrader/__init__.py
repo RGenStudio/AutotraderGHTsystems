@@ -1,3 +1,3 @@
-"""AutoTrader trading engine — paper-first Forex (M5 LLM agents)."""
+"""AutoTrader trading engine — paper-first Forex (M6 orchestrator)."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
