@@ -1,7 +1,7 @@
 # AutoTrader (ght.systems)
 
 Paper-first Forex trading engine for **EURUSD** / **USDJPY** (H1 entry, H4 trend).  
-**M3:** Risk Engine (code authority) + kill switch + paper/demo execution stubs.  
+**M4:** SQLite (WAL) trade journal — every risk decision, order, and system event is auditable.  
 Default **`MODE=paper`** — no live trading, no AI agents yet.
 
 Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/AutotraderGHTsystems)
@@ -24,10 +24,68 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ruff check src tests
-python -m autotrader          # prints MODE=paper + execution=paper
+python -m autotrader          # prints MODE=paper + execution=paper + database=…
 ```
 
 On Linux, `create_market_data_provider()` automatically selects the **mock/fixture** backend and `create_execution_backend()` returns the **paper** backend so tests pass without MetaTrader5.
+
+## Trade journal (SQLite / M4)
+
+Every Risk Engine decision (with **reason**), paper fill, and kill-switch change can be written to a local SQLite database (WAL mode) via SQLAlchemy.
+
+**Where the DB file lives**
+
+| Setting | Location |
+|---|---|
+| Default (no `DATABASE_URL`) | `data/autotrader.db` under the **repo root** |
+| Override | Set `DATABASE_URL` in local `.env` (e.g. `sqlite:///C:/path/to/data/autotrader.db`) |
+
+The `data/` directory is gitignored (along with `*.db`). Tests always use a **temp** SQLite file — they never touch the default path.
+
+**Inspect the journal**
+
+```bash
+# After the engine has written rows (or from a Python shell):
+python -c "
+from autotrader.journal import open_trade_journal
+j = open_trade_journal()  # or open_trade_journal('sqlite:///data/autotrader.db')
+for d in j.query_decisions(symbol='EURUSD'):
+    print(d.id, d.created_at, d.allowed, d.reason)
+"
+
+# Or with the sqlite3 CLI:
+sqlite3 data/autotrader.db \"SELECT id, symbol, allowed, reason, created_at FROM decisions ORDER BY id;\"
+```
+
+```python
+from datetime import UTC, datetime
+from autotrader.journal import open_trade_journal, persist_risk_outcome, persist_execution_outcome
+from autotrader.risk import CandidateOrder, RiskContext, RiskEngine, default_risk_limits
+from autotrader.execution import ApprovedOrder, create_execution_backend
+from autotrader.config import Mode
+
+journal = open_trade_journal()  # creates tables if needed
+engine = RiskEngine(limits=default_risk_limits())
+backend = create_execution_backend(mode=Mode.PAPER)
+candidate = CandidateOrder(
+    symbol="EURUSD", side="long", requested_risk_pct=0.5,
+    stop_distance_price=0.0010, entry_price=1.10,
+    idempotency_key="signal-2026-10-17-h1",
+)
+ctx = RiskContext(equity=10_000, now=datetime(2026, 10, 14, 15, 0, tzinfo=UTC))
+decision = engine.evaluate(candidate, ctx)
+decision_id = persist_risk_outcome(journal, decision, candidate=candidate, context=ctx)
+if decision.allowed:
+    approved = ApprovedOrder(
+        symbol=candidate.symbol, side=candidate.side, volume=0.1,
+        entry_price=candidate.entry_price, stop_price=1.0990, take_profit=None,
+        idempotency_key=candidate.idempotency_key, risk_pct=0.5,
+    )
+    result = backend.send_order(approved)
+    persist_execution_outcome(journal, approved, result, decision_id=decision_id)
+```
+
+Tables (brief M4): `signals`, `agent_calls` (ready for M5), `decisions`, `orders`, `trades`, `costs`, `system_events`, plus `kill_switch_state`.
 
 ## Risk Engine + execution (M3)
 
@@ -154,17 +212,20 @@ See also project docs: local-run rules (pre-VPS) and project context in the Curs
 ## Layout
 
 ```
-config/config.yaml          # non-secret defaults (risk, symbols, active_window, backtest costs)
+config/config.yaml          # non-secret defaults (risk, symbols, active_window, database)
 src/autotrader/
   active_window.py          # is_within_active_window(now)
   risk.py                   # RiskEngine — approve/reject candidate orders
   kill_switch.py            # in-memory kill switch (checked every cycle)
   reconcile.py              # startup local vs remote position reconcile
+  db/                       # SQLAlchemy engine (SQLite WAL) + ORM tables
+  journal/                  # TradeJournal API + M3 persist helpers + PersistentKillSwitch
   execution/                # paper backend + MT5 stub protocol (no CI order_send)
   data/                     # MarketDataProvider + MT5 / mock adapters
   indicators/               # EMA, RSI, ATR, ADX, Bollinger
   strategy/                 # A trend · B breakout · C mean reversion + ADX regime
   backtest/                 # closed-bar engine, costs, metrics, CLI
+data/autotrader.db          # default journal file (created at runtime; gitignored)
 tests/
   fixtures/sample_ohlc.csv  # tiny CSV smoke fixture
 .env.example                # empty template only

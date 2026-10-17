@@ -40,3 +40,8 @@ news:
 logging:
   level: INFO
   utc: true
+
+# SQLite trade journal (WAL). Override with DATABASE_URL in local `.env`.
+# Default file path (when DATABASE_URL unset): data/autotrader.db under repo root.
+database:
+  url: ""
