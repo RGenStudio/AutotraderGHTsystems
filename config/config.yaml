@@ -11,7 +11,9 @@ timeframes:
   entry: H1
   trend: H4
 
-# Active window suggestion for local pre-VPS runs (operator hours).
+# Active window for local pre-VPS runs (operator hours, London–NY overlap).
+# Outside this window: no new entries (see autotrader.active_window.is_within_active_window).
+# Inclusive start, exclusive end; weekdays only by default.
 active_window:
   timezone: UTC
   weekdays_only: true
