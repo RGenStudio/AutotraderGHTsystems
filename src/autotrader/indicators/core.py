@@ -86,6 +86,31 @@ def atr(
     return wilder_rma(true_range(high, low, close), period)
 
 
+def bollinger_bands(
+    close: pd.Series,
+    period: int = 20,
+    num_std: float = 2.0,
+) -> pd.DataFrame:
+    """
+    Bollinger Bands (SMA mid ± ``num_std`` * rolling std).
+
+    Returns columns: ``mid``, ``upper``, ``lower``.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    if num_std < 0:
+        raise ValueError("num_std must be >= 0")
+    mid = close.rolling(window=period, min_periods=period).mean()
+    std = close.rolling(window=period, min_periods=period).std(ddof=0)
+    return pd.DataFrame(
+        {
+            "mid": mid,
+            "upper": mid + num_std * std,
+            "lower": mid - num_std * std,
+        }
+    )
+
+
 def adx(
     high: pd.Series,
     low: pd.Series,

@@ -1,3 +1,3 @@
-"""AutoTrader trading engine — paper-first Forex (M1 data + active window)."""
+"""AutoTrader trading engine — paper-first Forex (M2 strategy + backtester)."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

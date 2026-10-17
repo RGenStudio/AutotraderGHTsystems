@@ -26,6 +26,13 @@ risk:
   max_weekly_drawdown_pct: 5.0
   max_open_positions: 2
 
+# Backtest cost simulation (price units; override via CLI flags).
+backtest:
+  spread: 0.00012
+  slippage: 0.00005
+  fee_per_trade: 0.0
+  starting_equity: 10000.0
+
 news:
   # ± minutes around High-impact USD/EUR/JPY events
   blackout_minutes: 30
