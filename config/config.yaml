@@ -52,6 +52,28 @@ llm:
     risk_manager: mock-mid
     decision_maker: mock-strong
 
+# M8 paper A/B harness (synthetic/mock cycles — not a multi-week live paper run).
+# ab_mode: rules_only | rules_plus_ai | both
+# Gate pass does NOT enable MODE=live.
+paper_ab:
+  ab_mode: both
+  cycles: 50
+  seed: 42
+  starting_equity: 10000.0
+  signal_rate: 0.55
+  bad_json_rate: 0.02
+  ai_skip_rate: 0.15
+  positive_bias: 0.55
+  gates:
+    min_closed_trades: 80
+    max_calendar_weeks: 12
+    max_drawdown_pct: 8.0
+    min_net_return_pct: 0.0
+    min_expectancy_r: 0.0
+    min_reward_risk: 1.0
+    max_bad_json_rate_pct: 3.0
+    ab_dd_tolerance_pp: 1.0
+
 logging:
   level: INFO
   utc: true

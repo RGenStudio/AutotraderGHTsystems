@@ -22,6 +22,45 @@ class Mode(StrEnum):
     LIVE = "live"
 
 
+class AbMode(StrEnum):
+    """Paper A/B harness arm selection (M8)."""
+
+    RULES_ONLY = "rules_only"
+    RULES_PLUS_AI = "rules_plus_ai"
+    BOTH = "both"
+
+
+class PaperGateThresholds(BaseModel):
+    """
+    Locked §13 paper pass criteria (project defaults).
+
+    The gate checker evaluates these and **never** enables ``MODE=live``.
+    """
+
+    min_closed_trades: int = Field(default=80, ge=1)
+    max_calendar_weeks: int = Field(default=12, ge=1)
+    max_drawdown_pct: float = Field(default=8.0, gt=0)  # percent points
+    min_net_return_pct: float = Field(default=0.0)  # must be strictly >
+    min_expectancy_r: float = Field(default=0.0)  # must be strictly >
+    min_reward_risk: float = Field(default=1.0, ge=0)
+    max_bad_json_rate_pct: float = Field(default=3.0, ge=0)  # percent of Agent 4 calls
+    ab_dd_tolerance_pp: float = Field(default=1.0, ge=0)  # rules+AI vs rules-only
+
+
+class PaperAbConfig(BaseModel):
+    """Synthetic/mock paper A/B harness settings (not a multi-week live run)."""
+
+    ab_mode: AbMode = AbMode.BOTH
+    cycles: int = Field(default=50, ge=1)
+    seed: int = 42
+    starting_equity: float = Field(default=10_000.0, gt=0)
+    signal_rate: float = Field(default=0.55, ge=0, le=1)
+    bad_json_rate: float = Field(default=0.02, ge=0, le=1)
+    ai_skip_rate: float = Field(default=0.15, ge=0, le=1)
+    positive_bias: float = Field(default=0.55, ge=0, le=1)
+    gates: PaperGateThresholds = Field(default_factory=PaperGateThresholds)
+
+
 class RiskLimits(BaseModel):
     """Hard risk ceilings enforced by code (AI cannot raise these)."""
 
@@ -83,6 +122,7 @@ class AppConfig(BaseModel):
     risk: RiskLimits = Field(default_factory=RiskLimits)
     news: NewsConfig = Field(default_factory=NewsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    paper_ab: PaperAbConfig = Field(default_factory=PaperAbConfig)
     logging: dict[str, Any] = Field(
         default_factory=lambda: {"level": "INFO", "utc": True}
     )

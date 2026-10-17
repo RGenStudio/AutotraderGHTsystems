@@ -3,6 +3,7 @@
 Paper-first Forex trading engine for **EURUSD** / **USDJPY** (H1 entry, H4 trend).  
 **M6:** Orchestrator H1 cycle + Telegram alerts + heartbeat/`system_events`.  
 **M7:** Read-only ops [dashboard](./dashboard/) (Next.js) — decisions / trades / events + kill switch; Vercel deploy for **ght.systems**.  
+**M8:** Paper A/B harness — **rules-only vs rules+AI** on synthetic/mock cycles + §13 gate checker (does **not** enable live).  
 Default **`MODE=paper`** — no live trading; LLM defaults to **mock** (no API keys required in CI).
 
 Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/AutotraderGHTsystems)
@@ -28,8 +29,9 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ruff check src tests
-python -m autotrader                     # smoke: MODE=paper + execution + database + llm + telegram
+python -m autotrader                     # smoke: MODE=paper + execution + database + llm + ab_mode + telegram
 python -m autotrader run --once          # one H1 orchestrator cycle (mock data / mock LLM)
+python -m autotrader paper-ab --cycles 50   # M8 paper A/B harness (synthetic cycles)
 autotrader run --once --at 2026-10-14T15:00:00+00:00
 ```
 
@@ -122,7 +124,54 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-Dashboard / Vercel is **M7** (not in this milestone).
+## Paper A/B harness (M8)
+
+Compare **rules-only** (Strategy Engine → Risk Engine, no LLM) vs **rules+AI** (Agents 1–4 filter) on **N synthetic/mock cycles**. This is a CI/local harness — **not** a multi-week Exness demo run.
+
+Config (`config/config.yaml` → `paper_ab`):
+
+| Key | Values |
+|---|---|
+| `ab_mode` | `rules_only` \| `rules_plus_ai` \| `both` |
+| `cycles` | default `50` |
+| `gates.*` | §13 thresholds (80 trades or 12 weeks, DD≤8%, expectancy>0, bad-JSON≤3%, A/B DD/expectancy) |
+
+```bash
+# Both arms, 50 synthetic cycles → markdown + JSON under reports/ (gitignored except examples/)
+python -m autotrader paper-ab --cycles 50
+python -m autotrader paper-ab --cycles 50 --ab-mode rules_only
+python -m autotrader.paper_ab --cycles 20 --seed 7
+
+# Fixture-driven (tests / reproducible demo)
+python -m autotrader paper-ab --cycles 6 --fixture tests/fixtures/paper_ab_cycles.json
+
+# Console script alias
+autotrader-paper-ab --cycles 50
+```
+
+Metrics per arm: **trades**, **expectancy (R)**, **max DD**, **bad-JSON rate** (Agent 4 / rules+AI).  
+§13 gate checker prints **PASS/FAIL** and writes it into the report — it **never** sets `MODE=live` (`live_enabled=false` always).
+
+Example committed sample: [`reports/examples/paper-ab-example.md`](./reports/examples/paper-ab-example.md).
+
+### Run paper A/B on Windows with MT5 later
+
+The harness itself needs **no MT5** (synthetic cycles work on Linux CI and Windows). When you later compare arms against a real Exness **demo** journal:
+
+1. Keep **`MODE=paper`** / demo account — never live until §13 passes **and** a human approves.
+2. On the Windows PC with Exness MT5 installed:
+
+   ```bat
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -e ".[dev,mt5]"
+   copy .env.example .env
+   rem fill MT5_* locally; leave MODE=paper
+   python -m autotrader paper-ab --cycles 50
+   ```
+
+3. Use the orchestrator for live-demo H1 cycles (`python -m autotrader run --once --mt5-data`) while the A/B harness remains the **offline comparator** + gate checker.
+4. Document closed trades / weeks in the trade journal; promote to small live capital only after human review — this CLI will not flip `MODE` for you.
 
 ## Trade journal (SQLite / M4)
 
@@ -322,7 +371,7 @@ Env: `DASHBOARD_PASSWORD`, `DASHBOARD_DATA_MODE=demo|api` (see `dashboard/.env.e
 
 ```
 dashboard/                  # M7 Next.js ops UI (Vercel root directory)
-config/config.yaml          # non-secret defaults (risk, symbols, active_window, llm, database)
+config/config.yaml          # non-secret defaults (risk, symbols, active_window, llm, paper_ab, database)
 src/autotrader/
   active_window.py          # is_within_active_window(now)
   risk.py                   # RiskEngine — approve/reject candidate orders
@@ -330,6 +379,7 @@ src/autotrader/
   reconcile.py              # startup local vs remote position reconcile
   orchestrator/             # H1 cycle + scheduler hook + heartbeat
   telegram/                 # Telegram notifier (soft-fail; TELEGRAM_* from env)
+  paper_ab/                 # M8 rules-only vs rules+AI harness + §13 gates + reports
   db/                       # SQLAlchemy engine (SQLite WAL) + ORM tables
   journal/                  # TradeJournal API + persist helpers + PersistentKillSwitch
   llm/                      # LLMClient + mock/HTTP backends + cost hook
@@ -340,8 +390,10 @@ src/autotrader/
   strategy/                 # A trend · B breakout · C mean reversion + ADX regime
   backtest/                 # closed-bar engine, costs, metrics, CLI
 data/autotrader.db          # default journal file (created at runtime; gitignored)
+reports/                    # runtime A/B reports (gitignored); examples/ committed
 tests/
   fixtures/sample_ohlc.csv  # tiny CSV smoke fixture
+  fixtures/paper_ab_cycles.json
 .env.example                # empty template only (LLM / Telegram keys listed)
 ```
 

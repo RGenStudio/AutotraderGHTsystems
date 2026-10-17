@@ -1,3 +1,3 @@
-"""AutoTrader trading engine — paper-first Forex (M6 orchestrator)."""
+"""AutoTrader trading engine — paper-first Forex (M8 paper A/B harness)."""
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"

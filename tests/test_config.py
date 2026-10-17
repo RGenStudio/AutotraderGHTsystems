@@ -45,6 +45,17 @@ def test_llm_and_news_defaults_from_yaml() -> None:
     assert "USD" in cfg.news.high_impact_currencies
 
 
+def test_paper_ab_defaults_from_yaml() -> None:
+    from autotrader.config import AbMode
+
+    cfg = load_yaml_config()
+    assert cfg.paper_ab.ab_mode == AbMode.BOTH
+    assert cfg.paper_ab.cycles == 50
+    assert cfg.paper_ab.gates.min_closed_trades == 80
+    assert cfg.paper_ab.gates.max_drawdown_pct == 8.0
+    assert cfg.paper_ab.gates.max_bad_json_rate_pct == 3.0
+
+
 def test_resolve_mode_defaults_to_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MODE", raising=False)
     assert resolve_mode() == Mode.PAPER
