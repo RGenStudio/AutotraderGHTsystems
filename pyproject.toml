@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autotrader"
 version = "0.1.0"
-description = "AutoTrader — paper-first Forex engine (M1 data layer + active window)"
+description = "AutoTrader — paper-first Forex engine (M2 strategy + backtester)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -31,6 +31,7 @@ mt5 = [
 
 [project.scripts]
 autotrader = "autotrader.__main__:main"
+autotrader-backtest = "autotrader.backtest.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
