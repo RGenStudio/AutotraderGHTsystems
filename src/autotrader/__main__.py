@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 
 from autotrader.config import Mode, load_config, require_non_live_mode
+from autotrader.db import resolve_database_url
 from autotrader.execution.factory import LiveModeForbiddenError
 from autotrader.logging_setup import setup_logging
 
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"MODE={config.mode.value}")
     if config.mode == Mode.PAPER:
         print("execution=paper (no real MT5 order_send)")
+    print(f"database={resolve_database_url()}")
     return 0
 
 

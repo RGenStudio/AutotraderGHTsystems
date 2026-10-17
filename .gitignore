@@ -32,11 +32,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Runtime / local data (repo-root only — do not ignore src/autotrader/data/)
+# Runtime / local data (repo-root only — do not ignore src/autotrader/data/ or journal/)
 *.db
 *.sqlite
 *.sqlite3
 /data/
 logs/
 *.log
-journal/
+/journal/

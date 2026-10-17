@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autotrader"
 version = "0.1.0"
-description = "AutoTrader — paper-first Forex engine (M3 risk + execution stubs)"
+description = "AutoTrader — paper-first Forex engine (M4 SQLite trade journal)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -17,6 +17,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "pandas>=2.0",
   "numpy>=1.26",
+  "SQLAlchemy>=2.0",
 ]
 
 [project.optional-dependencies]
