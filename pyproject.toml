@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autotrader"
-version = "0.6.0"
-description = "AutoTrader — paper-first Forex engine (M6 orchestrator + Telegram)"
+version = "0.8.0"
+description = "AutoTrader — paper-first Forex engine (M8 paper A/B harness)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -34,6 +34,7 @@ mt5 = [
 [project.scripts]
 autotrader = "autotrader.__main__:main"
 autotrader-backtest = "autotrader.backtest.cli:main"
+autotrader-paper-ab = "autotrader.paper_ab.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

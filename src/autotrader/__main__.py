@@ -1,4 +1,4 @@
-"""CLI entry: ``python -m autotrader`` / ``autotrader run --once``."""
+"""CLI entry: ``python -m autotrader`` / ``autotrader run --once`` / ``paper-ab``."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from autotrader.execution.factory import LiveModeForbiddenError
 from autotrader.logging_setup import setup_logging
 from autotrader.orchestrator.cycle import build_orchestrator
 from autotrader.orchestrator.scheduler import SimpleIntervalScheduler
+from autotrader.paper_ab.cli import main as paper_ab_main
 from autotrader.telegram.notifier import create_telegram_notifier
 
 
@@ -21,6 +22,7 @@ def _print_smoke(config) -> None:
         print("execution=paper (no real MT5 order_send)")
     print(f"database={resolve_database_url()}")
     print(f"llm_backend={config.llm.backend}")
+    print(f"ab_mode={config.paper_ab.ab_mode.value}")
     tg = create_telegram_notifier()
     print(f"telegram={'enabled' if tg.enabled else 'disabled'}")
 
@@ -78,10 +80,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_paper_ab(args: argparse.Namespace) -> int:
+    """Delegate to paper_ab.cli with remaining argv after ``paper-ab``."""
+    return int(paper_ab_main(list(args.paper_ab_argv)))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autotrader",
-        description="AutoTrader paper-first Forex engine (M6 orchestrator)",
+        description="AutoTrader paper-first Forex engine (M8 paper A/B harness)",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -116,6 +123,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.set_defaults(func=cmd_run)
 
+    paper_p = sub.add_parser(
+        "paper-ab",
+        help="Paper A/B harness (rules-only vs rules+AI); see --help after paper-ab",
+        add_help=False,
+    )
+    paper_p.add_argument(
+        "paper_ab_argv",
+        nargs=argparse.REMAINDER,
+        help=argparse.SUPPRESS,
+    )
+    paper_p.set_defaults(func=cmd_paper_ab)
+
     return parser
 
 
@@ -124,6 +143,13 @@ def main(argv: list[str] | None = None) -> int:
     # Bare `python -m autotrader` → smoke (M0–M5 compat)
     if not argv:
         return cmd_smoke(argparse.Namespace())
+
+    # ``paper-ab`` may receive its own --help / flags; strip a leading ``--`` remnant.
+    if argv and argv[0] == "paper-ab":
+        rest = argv[1:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        return cmd_paper_ab(argparse.Namespace(paper_ab_argv=rest))
 
     parser = build_parser()
     # Allow `autotrader run --once` and also `autotrader --help`

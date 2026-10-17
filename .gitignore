@@ -40,3 +40,8 @@ Thumbs.db
 logs/
 *.log
 /journal/
+
+# M8 paper A/B runtime reports (keep committed examples only)
+/reports/*
+!/reports/examples/
+!/reports/examples/**
