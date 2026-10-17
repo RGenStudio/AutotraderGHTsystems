@@ -110,3 +110,15 @@ def load_config(path: Path | None = None) -> AppConfig:
     app = load_yaml_config(path)
     mode = resolve_mode(app)
     return app.model_copy(update={"mode": mode})
+
+
+def require_non_live_mode(mode: Mode) -> Mode:
+    """
+    Refuse ``live`` for this project phase.
+
+    Import is deferred so ``config`` stays free of execution-layer cycles.
+    """
+    from autotrader.execution.factory import refuse_live_mode
+
+    refuse_live_mode(mode)
+    return mode
