@@ -1,7 +1,7 @@
 # AutoTrader (ght.systems)
 
 Paper-first Forex trading engine for **EURUSD** / **USDJPY** (H1 entry, H4 trend).  
-**M5:** `LLMClient` + Agents 1–4 (Technical, News, Risk Manager, Decision Maker).  
+**M6:** Orchestrator H1 cycle + Telegram alerts + heartbeat/`system_events`.  
 Default **`MODE=paper`** — no live trading; LLM defaults to **mock** (no API keys required in CI).
 
 Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/AutotraderGHTsystems)
@@ -14,6 +14,7 @@ Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/
 - Bad Decision Maker JSON / LLM failure ≡ **do not trade**. Kill switch checked every Risk Engine cycle.
 - Strategy Engine creates **candidate entries in code only** — AI filters/sizes; it does not invent signals.
 - Agents propose only; **Risk Engine (code) is authority**. Agent 3 cannot raise risk ceilings.
+- Telegram alerts soft-fail: if Telegram is down, the cycle **logs and continues** (never hard-fails).
 - Broker credentials and API keys live only in a local `.env` on the Windows PC (or later Windows VPS) — never in chat or git.
 - MetaTrader5 Python package + terminal require **Windows**. Cloud Linux / CI uses the **mock** data backend, **mock** LLM, and **paper** execution (no MT5 `order_send`).
 
@@ -25,7 +26,9 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ruff check src tests
-python -m autotrader          # prints MODE=paper + execution=paper + database=… + llm_backend=mock
+python -m autotrader                     # smoke: MODE=paper + execution + database + llm + telegram
+python -m autotrader run --once          # one H1 orchestrator cycle (mock data / mock LLM)
+autotrader run --once --at 2026-10-14T15:00:00+00:00
 ```
 
 On Linux, `create_market_data_provider()` automatically selects the **mock/fixture** backend, `create_llm_client()` uses the **mock** LLM, and `create_execution_backend()` returns the **paper** backend so tests pass without MetaTrader5 or API keys.
@@ -72,7 +75,52 @@ else:
 
 **Costs:** each agent call is written to `agent_calls`; estimated USD usage goes to `costs` (`kind=llm_api`).
 
-Orchestrator + Telegram alerts are **M6** (not in this milestone).
+Agents 1∥2 run in **parallel** inside the pipeline (Agents 3 → 4 stay sequential).
+
+## Orchestrator + Telegram (M6)
+
+One H1 cycle:
+
+`data → indicators → strategy pre-filter → (if signal) Agents 1∥2 → 3 → 4 → Risk Engine → paper execution stub → journal`
+
+Gates every cycle: **`MODE=paper`**, **kill switch**, **active_window** (no new entries outside). Heartbeat / engine up-down are written to `system_events`.
+
+```bash
+# Single cycle (mock market data + mock LLM; Telegram optional from .env)
+python -m autotrader run --once
+python -m autotrader run --once --at 2026-10-14T15:00:00+00:00
+
+# Scheduler hook (tests use a fake clock; production can loop with sleep)
+python -m autotrader run --loop --max-cycles 1
+```
+
+```python
+from datetime import UTC, datetime, timedelta
+from autotrader.orchestrator import build_orchestrator, SimpleIntervalScheduler
+from autotrader.journal import open_trade_journal
+
+journal = open_trade_journal()  # or temp sqlite URL in tests
+orch = build_orchestrator(journal=journal, force_mock_data=True, force_mock_llm=True)
+orch.heartbeat.mark_up(message="engine started")
+result = orch.run_cycle(now=datetime(2026, 10, 14, 15, 0, tzinfo=UTC))
+# result.status / result.symbol_results — approve | reject | no_signal | skipped
+
+sched = SimpleIntervalScheduler(orchestrator=orch, interval=timedelta(hours=1), sleep=lambda _s: None)
+sched.run_until(
+    start=datetime(2026, 10, 14, 15, 0, tzinfo=UTC),
+    stop_at=datetime(2026, 10, 14, 18, 0, tzinfo=UTC),
+)
+orch.heartbeat.mark_down(message="engine stopped")
+```
+
+**Telegram:** set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in local `.env` to enable alerts on **approve / reject / kill / errors**. Unset → no-op notifier (CI default). HTTP is mockable in tests; failures are logged and the cycle continues.
+
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+Dashboard / Vercel is **M7** (not in this milestone).
 
 ## Trade journal (SQLite / M4)
 
@@ -263,10 +311,12 @@ src/autotrader/
   risk.py                   # RiskEngine — approve/reject candidate orders
   kill_switch.py            # in-memory kill switch (checked every cycle)
   reconcile.py              # startup local vs remote position reconcile
+  orchestrator/             # H1 cycle + scheduler hook + heartbeat
+  telegram/                 # Telegram notifier (soft-fail; TELEGRAM_* from env)
   db/                       # SQLAlchemy engine (SQLite WAL) + ORM tables
   journal/                  # TradeJournal API + persist helpers + PersistentKillSwitch
   llm/                      # LLMClient + mock/HTTP backends + cost hook
-  agents/                   # Agents 1–4 + calendar adapter + pipeline
+  agents/                   # Agents 1–4 + calendar adapter + pipeline (1∥2)
   execution/                # paper backend + MT5 stub protocol (no CI order_send)
   data/                     # MarketDataProvider + MT5 / mock adapters
   indicators/               # EMA, RSI, ATR, ADX, Bollinger
@@ -275,7 +325,7 @@ src/autotrader/
 data/autotrader.db          # default journal file (created at runtime; gitignored)
 tests/
   fixtures/sample_ohlc.csv  # tiny CSV smoke fixture
-.env.example                # empty template only (LLM keys already listed)
+.env.example                # empty template only (LLM / Telegram keys listed)
 ```
 
 ## Disclaimer
