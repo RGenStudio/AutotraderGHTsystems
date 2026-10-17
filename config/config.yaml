@@ -1,0 +1,33 @@
+# AutoTrader project defaults (non-secret). Risk limits are locked until a human changes them.
+# Timezone for all engine decisions: UTC.
+
+mode: paper
+
+symbols:
+  - EURUSD
+  - USDJPY
+
+timeframes:
+  entry: H1
+  trend: H4
+
+# Active window suggestion for local pre-VPS runs (operator hours).
+active_window:
+  timezone: UTC
+  weekdays_only: true
+  start: "12:00"
+  end: "21:00"
+
+risk:
+  max_risk_per_trade_pct: 0.5
+  max_daily_loss_pct: 2.0
+  max_weekly_drawdown_pct: 5.0
+  max_open_positions: 2
+
+news:
+  # ± minutes around High-impact USD/EUR/JPY events
+  blackout_minutes: 30
+
+logging:
+  level: INFO
+  utc: true
