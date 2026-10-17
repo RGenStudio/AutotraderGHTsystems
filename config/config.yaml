@@ -34,8 +34,23 @@ backtest:
   starting_equity: 10000.0
 
 news:
-  # ± minutes around High-impact USD/EUR/JPY events
+  # ± minutes around High-impact USD/EUR/JPY events (Agent 2)
   blackout_minutes: 30
+  high_impact_currencies:
+    - USD
+    - EUR
+    - JPY
+
+# LLMClient (M5). Default backend=mock so CI needs no API keys.
+# Keys / LLM_BASE_URL stay in local `.env` only.
+llm:
+  backend: mock  # mock | http
+  timeout_seconds: 30
+  models:
+    technical: mock-cheap
+    news: mock-cheap
+    risk_manager: mock-mid
+    decision_maker: mock-strong
 
 logging:
   level: INFO

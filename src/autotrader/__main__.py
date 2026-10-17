@@ -25,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     if config.mode == Mode.PAPER:
         print("execution=paper (no real MT5 order_send)")
     print(f"database={resolve_database_url()}")
+    print(f"llm_backend={config.llm.backend}")
     return 0
 
 

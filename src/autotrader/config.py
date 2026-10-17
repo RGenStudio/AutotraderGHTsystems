@@ -49,6 +49,30 @@ class ActiveWindow(BaseModel):
     end: str = "21:00"
 
 
+class LLMModels(BaseModel):
+    """Model slots — cheap for Agents 1–2, mid for 3, stronger for Decision Maker."""
+
+    technical: str = "mock-cheap"
+    news: str = "mock-cheap"
+    risk_manager: str = "mock-mid"
+    decision_maker: str = "mock-strong"
+
+
+class LLMConfig(BaseModel):
+    """Non-secret LLM client settings (keys stay in `.env`)."""
+
+    backend: str = "mock"  # mock | http
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    models: LLMModels = Field(default_factory=LLMModels)
+
+
+class NewsConfig(BaseModel):
+    blackout_minutes: int = Field(default=30, ge=0)
+    high_impact_currencies: list[str] = Field(
+        default_factory=lambda: ["USD", "EUR", "JPY"]
+    )
+
+
 class AppConfig(BaseModel):
     mode: Mode = Mode.PAPER
     symbols: list[str] = Field(default_factory=lambda: ["EURUSD", "USDJPY"])
@@ -57,10 +81,13 @@ class AppConfig(BaseModel):
     )
     active_window: ActiveWindow = Field(default_factory=ActiveWindow)
     risk: RiskLimits = Field(default_factory=RiskLimits)
-    news: dict[str, Any] = Field(default_factory=lambda: {"blackout_minutes": 30})
+    news: NewsConfig = Field(default_factory=NewsConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     logging: dict[str, Any] = Field(
         default_factory=lambda: {"level": "INFO", "utc": True}
     )
+    database: dict[str, Any] = Field(default_factory=lambda: {"url": ""})
+    backtest: dict[str, Any] = Field(default_factory=dict)
 
 
 class EnvSettings(BaseSettings):

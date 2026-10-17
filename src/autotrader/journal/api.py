@@ -9,7 +9,12 @@ from typing import Any
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
-from autotrader.db.engine import create_db_engine, init_db, make_session_factory, resolve_database_url
+from autotrader.db.engine import (
+    create_db_engine,
+    init_db,
+    make_session_factory,
+    resolve_database_url,
+)
 from autotrader.db.models import (
     AgentCallRow,
     CostRow,
@@ -430,7 +435,7 @@ class TradeJournal:
             session.add(row)
             session.commit()
             session.refresh(row)
-            return int(getattr(row, "id"))
+            return int(row.id)  # type: ignore[attr-defined]
 
     def _fetch_all(self, stmt: Select[Any], *, limit: int | None) -> list[Any]:
         if limit is not None:

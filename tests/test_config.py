@@ -35,6 +35,16 @@ def test_risk_defaults_from_yaml() -> None:
     assert cfg.risk.max_open_positions == 2
 
 
+def test_llm_and_news_defaults_from_yaml() -> None:
+    cfg = load_yaml_config()
+    assert cfg.llm.backend == "mock"
+    assert cfg.llm.timeout_seconds == 30
+    assert cfg.llm.models.technical == "mock-cheap"
+    assert cfg.llm.models.decision_maker == "mock-strong"
+    assert cfg.news.blackout_minutes == 30
+    assert "USD" in cfg.news.high_impact_currencies
+
+
 def test_resolve_mode_defaults_to_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MODE", raising=False)
     assert resolve_mode() == Mode.PAPER

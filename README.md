@@ -1,8 +1,8 @@
 # AutoTrader (ght.systems)
 
 Paper-first Forex trading engine for **EURUSD** / **USDJPY** (H1 entry, H4 trend).  
-**M4:** SQLite (WAL) trade journal — every risk decision, order, and system event is auditable.  
-Default **`MODE=paper`** — no live trading, no AI agents yet.
+**M5:** `LLMClient` + Agents 1–4 (Technical, News, Risk Manager, Decision Maker).  
+Default **`MODE=paper`** — no live trading; LLM defaults to **mock** (no API keys required in CI).
 
 Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/AutotraderGHTsystems)
 
@@ -11,10 +11,11 @@ Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/
 - Default **`MODE=paper`**. Do not enable `live` until §13 paper criteria pass and a human approves. The CLI / execution factory **refuse** `MODE=live`.
 - Risk Engine defaults (code): **0.5%** per trade · **2%** daily loss · **5%** weekly drawdown · **max 2** open positions (at most one per symbol).
 - **Active window (UTC):** weekdays **12:00–21:00** by default — outside the window the engine must **not** open new entries.
-- Bad Decision Maker JSON ≡ **reject**. Kill switch checked every Risk Engine cycle.
-- Strategy Engine creates **candidate entries in code only** — AI does not invent signals (agents come later).
+- Bad Decision Maker JSON / LLM failure ≡ **do not trade**. Kill switch checked every Risk Engine cycle.
+- Strategy Engine creates **candidate entries in code only** — AI filters/sizes; it does not invent signals.
+- Agents propose only; **Risk Engine (code) is authority**. Agent 3 cannot raise risk ceilings.
 - Broker credentials and API keys live only in a local `.env` on the Windows PC (or later Windows VPS) — never in chat or git.
-- MetaTrader5 Python package + terminal require **Windows**. Cloud Linux / CI uses the **mock** data backend and **paper** execution (no MT5 `order_send`).
+- MetaTrader5 Python package + terminal require **Windows**. Cloud Linux / CI uses the **mock** data backend, **mock** LLM, and **paper** execution (no MT5 `order_send`).
 
 ## Quick start (dev / Linux CI)
 
@@ -24,10 +25,54 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest
 ruff check src tests
-python -m autotrader          # prints MODE=paper + execution=paper + database=…
+python -m autotrader          # prints MODE=paper + execution=paper + database=… + llm_backend=mock
 ```
 
-On Linux, `create_market_data_provider()` automatically selects the **mock/fixture** backend and `create_execution_backend()` returns the **paper** backend so tests pass without MetaTrader5.
+On Linux, `create_market_data_provider()` automatically selects the **mock/fixture** backend, `create_llm_client()` uses the **mock** LLM, and `create_execution_backend()` returns the **paper** backend so tests pass without MetaTrader5 or API keys.
+
+## LLMClient + Agents 1–4 (M5)
+
+All model calls go through **`LLMClient`** (HTTP wrapper + pydantic schema validation + timeout). CI uses `MockLLMBackend` — no real API keys.
+
+| Agent | Role | Model slot (config) |
+|---|---|---|
+| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` (cheap) |
+| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` (cheap) |
+| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` (mid) |
+| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` (stronger) |
+
+```python
+from datetime import UTC, datetime
+from autotrader.agents.pipeline import build_agent_pipeline
+from autotrader.agents.calendar import StubNewsCalendar
+from autotrader.journal import open_trade_journal
+from autotrader.llm import MockLLMBackend, LLMClient
+
+journal = open_trade_journal()  # or temp sqlite URL in tests
+backend = MockLLMBackend()
+# enqueue Agent1..4 JSON dicts / strings for deterministic tests
+pipe = build_agent_pipeline(journal=journal, force_mock=True)
+# Or: AgentPipeline(LLMClient(backend), journal=journal, calendar=StubNewsCalendar(events=[]))
+
+result = pipe.run(
+    {"symbol": "EURUSD", "side": "long", "entry_price": 1.085, "strategy": "A"},
+    now=datetime(2026, 10, 14, 15, 0, tzinfo=UTC),
+    symbol="EURUSD",
+    idempotency_key="signal-2026-10-14-h1",
+)
+if result.trade_allowed and result.risk_payload:
+    # Pass result.risk_payload to RiskEngine.evaluate(..., raw_json=...)
+    ...
+else:
+    # reason: news_blackout | bad_json | llm_or_schema_fail | decision_skip | ...
+    ...
+```
+
+**Agent 2 calendar:** set `NEWS_CALENDAR_URL` in local `.env` to a structured JSON feed (adapter: `UrlNewsCalendar`). Tests use `StubNewsCalendar`. Blackout is **±30 minutes** around High-impact **USD/EUR/JPY** events for the symbol’s currencies (code-enforced).
+
+**Costs:** each agent call is written to `agent_calls`; estimated USD usage goes to `costs` (`kind=llm_api`).
+
+Orchestrator + Telegram alerts are **M6** (not in this milestone).
 
 ## Trade journal (SQLite / M4)
 
@@ -85,7 +130,7 @@ if decision.allowed:
     persist_execution_outcome(journal, approved, result, decision_id=decision_id)
 ```
 
-Tables (brief M4): `signals`, `agent_calls` (ready for M5), `decisions`, `orders`, `trades`, `costs`, `system_events`, plus `kill_switch_state`.
+Tables (brief M4+M5): `signals`, `agent_calls`, `decisions`, `orders`, `trades`, `costs`, `system_events`, plus `kill_switch_state`.
 
 ## Risk Engine + execution (M3)
 
@@ -212,14 +257,16 @@ See also project docs: local-run rules (pre-VPS) and project context in the Curs
 ## Layout
 
 ```
-config/config.yaml          # non-secret defaults (risk, symbols, active_window, database)
+config/config.yaml          # non-secret defaults (risk, symbols, active_window, llm, database)
 src/autotrader/
   active_window.py          # is_within_active_window(now)
   risk.py                   # RiskEngine — approve/reject candidate orders
   kill_switch.py            # in-memory kill switch (checked every cycle)
   reconcile.py              # startup local vs remote position reconcile
   db/                       # SQLAlchemy engine (SQLite WAL) + ORM tables
-  journal/                  # TradeJournal API + M3 persist helpers + PersistentKillSwitch
+  journal/                  # TradeJournal API + persist helpers + PersistentKillSwitch
+  llm/                      # LLMClient + mock/HTTP backends + cost hook
+  agents/                   # Agents 1–4 + calendar adapter + pipeline
   execution/                # paper backend + MT5 stub protocol (no CI order_send)
   data/                     # MarketDataProvider + MT5 / mock adapters
   indicators/               # EMA, RSI, ATR, ADX, Bollinger
@@ -228,7 +275,7 @@ src/autotrader/
 data/autotrader.db          # default journal file (created at runtime; gitignored)
 tests/
   fixtures/sample_ohlc.csv  # tiny CSV smoke fixture
-.env.example                # empty template only
+.env.example                # empty template only (LLM keys already listed)
 ```
 
 ## Disclaimer
