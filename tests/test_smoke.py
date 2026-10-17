@@ -12,8 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def test_cli_prints_mode_paper(capsys, monkeypatch) -> None:
     monkeypatch.delenv("MODE", raising=False)
     assert main([]) == 0
-    out = capsys.readouterr().out.strip()
-    assert out == "MODE=paper"
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[0] == "MODE=paper"
+    assert any("execution=paper" in line for line in out)
 
 
 def test_env_example_lists_required_keys_empty() -> None:
