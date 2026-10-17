@@ -1,3 +1,3 @@
-"""AutoTrader trading engine — paper-first Forex (M3 risk + execution stubs)."""
+"""AutoTrader trading engine — paper-first Forex (M5 LLM agents)."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

@@ -27,9 +27,15 @@ def persist_signal(
     created_at: datetime | None = None,
 ) -> int:
     """Write a Strategy Engine :class:`~autotrader.strategy.types.Signal`."""
+    strategy = (
+        signal.strategy.value
+        if hasattr(signal.strategy, "value")
+        else str(signal.strategy)
+    )
+    side = signal.side.value if hasattr(signal.side, "value") else str(signal.side)
     payload = {
-        "strategy": signal.strategy.value if hasattr(signal.strategy, "value") else str(signal.strategy),
-        "side": signal.side.value if hasattr(signal.side, "value") else str(signal.side),
+        "strategy": strategy,
+        "side": side,
         "bar_index": signal.bar_index,
         "bar_time": signal.bar_time.isoformat(),
         "entry_price": signal.entry_price,

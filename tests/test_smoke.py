@@ -16,6 +16,7 @@ def test_cli_prints_mode_paper(capsys, monkeypatch) -> None:
     assert out[0] == "MODE=paper"
     assert any("execution=paper" in line for line in out)
     assert any(line.startswith("database=") for line in out)
+    assert any(line == "llm_backend=mock" for line in out)
 
 
 def test_env_example_lists_required_keys_empty() -> None:
