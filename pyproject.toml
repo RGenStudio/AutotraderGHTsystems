@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autotrader"
 version = "0.1.0"
-description = "AutoTrader M0 — paper-first Forex trading engine scaffold (ght.systems)"
+description = "AutoTrader — paper-first Forex engine (M1 data layer + active window)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -15,12 +15,18 @@ dependencies = [
   "pydantic-settings>=2.2",
   "PyYAML>=6.0",
   "python-dotenv>=1.0",
+  "pandas>=2.0",
+  "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
+]
+# Windows only — do not install on Linux CI
+mt5 = [
+  "MetaTrader5>=5.0.45",
 ]
 
 [project.scripts]
