@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from autotrader.config import EnvSettings
 from autotrader.journal import open_trade_journal
 from autotrader.llm import LLMClient, MockLLMBackend, create_llm_client
+from autotrader.llm.anthropic import AnthropicMessagesBackend
 from autotrader.llm.client import LLMResult
 from autotrader.llm.factory import (
     _resolve_base_url,
@@ -19,6 +20,8 @@ from autotrader.llm.factory import (
     should_force_mock_llm,
 )
 from autotrader.llm.http import HttpxLLMBackend
+from autotrader.llm.providers import resolve_provider
+from autotrader.llm.routing import RoutingLLMBackend
 from autotrader.llm.types import ChatMessage, LLMUsage
 
 
@@ -178,6 +181,101 @@ def test_create_llm_client_http_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("LLM_BACKEND", "http")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     client = create_llm_client(force_mock=False)
-    assert isinstance(client._backend, HttpxLLMBackend)  # noqa: SLF001
-    assert client._backend.base_url == "https://api.openai.com/v1"  # noqa: SLF001
+    assert isinstance(client._backend, RoutingLLMBackend)  # noqa: SLF001
+    openai = client._backend._backends["openai"]  # noqa: SLF001
+    assert isinstance(openai, HttpxLLMBackend)
+    assert openai.base_url == "https://api.openai.com/v1"
+
+
+def test_resolve_provider_by_model_prefix() -> None:
+    assert resolve_provider("deepseek-chat") == "deepseek"
+    assert resolve_provider("gpt-4o-mini") == "openai"
+    assert resolve_provider("claude-sonnet-4-5") == "anthropic"
+    assert resolve_provider("mock-cheap") == "mock"
+
+
+def test_routing_soft_falls_to_mock_without_provider_key() -> None:
+    env = EnvSettings(openai_api_key="sk-only")
+    backend = RoutingLLMBackend(env=env)
+    # DeepSeek model without DEEPSEEK_API_KEY → mock (no crash)
+    raw = backend.complete(
+        model="deepseek-chat",
+        messages=[ChatMessage(role="user", content="{}")],
+        timeout_s=5,
+    )
+    assert raw.usage.meta.get("backend") == "mock"
+    # OpenAI model uses real OpenAI backend object (not called over network here)
+    assert "openai" in backend._backends  # noqa: SLF001
+    assert "deepseek" not in backend._backends  # noqa: SLF001
+    assert "anthropic" not in backend._backends  # noqa: SLF001
+
+
+def test_routing_wires_all_three_providers() -> None:
+    env = EnvSettings(
+        openai_api_key="sk-test",
+        deepseek_api_key="ds-test",
+        anthropic_api_key="ant-test",
+    )
+    backend = RoutingLLMBackend(env=env)
+    assert isinstance(backend._backends["openai"], HttpxLLMBackend)  # noqa: SLF001
+    assert backend._backends["openai"].base_url == "https://api.openai.com/v1"  # noqa: SLF001
+    assert isinstance(backend._backends["deepseek"], HttpxLLMBackend)  # noqa: SLF001
+    assert backend._backends["deepseek"].base_url == "https://api.deepseek.com"  # noqa: SLF001
+    assert isinstance(backend._backends["anthropic"], AnthropicMessagesBackend)  # noqa: SLF001
+
+
+def test_anthropic_backend_posts_messages(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "content": [{"type": "text", "text": '{"ok": true}'}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+
+    class _FakeClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            _ = args, kwargs
+
+        def __enter__(self) -> _FakeClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            _ = args
+
+        def post(self, url: str, headers: dict, json: dict) -> _FakeResponse:
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return _FakeResponse()
+
+    import autotrader.llm.anthropic as anthropic_mod
+
+    monkeypatch.setattr(anthropic_mod.httpx, "Client", _FakeClient)
+    backend = AnthropicMessagesBackend(api_key="ant-test")
+    raw = backend.complete(
+        model="claude-sonnet-4-5",
+        messages=[
+            ChatMessage(role="system", content="Agent 4"),
+            ChatMessage(role="user", content='{"x":1}'),
+        ],
+        timeout_s=5,
+    )
+    assert raw.text == '{"ok": true}'
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["x-api-key"] == "ant-test"
+    assert headers["anthropic-version"] == "2023-06-01"
+    body = captured["json"]
+    assert isinstance(body, dict)
+    assert body["model"] == "claude-sonnet-4-5"
+    assert body["system"] == "Agent 4"
+    assert body["messages"] == [{"role": "user", "content": '{"x":1}'}]

@@ -52,18 +52,19 @@ news:
     - EUR
     - JPY
 
-# LLMClient. Default backend=http with real model ids (Bartender: don't over-save on 3+4).
-# CI / no keys: create_llm_client soft-falls to mock. Force mock with LLM_BACKEND=mock.
-# Keys / LLM_BASE_URL stay in local `.env` only. Keep MODE=paper.
-# You may set all four models to gpt-4o if preferred (see ops doc).
+# LLMClient — brief page 8: cheap models filter first; smarter model decides last.
+# Defaults: Agents 1–2 deepseek-chat · Agent 3 gpt-4o-mini · Agent 4 claude-sonnet-4-5.
+# Routing: deepseek-* → DeepSeek (DEEPSEEK_API_KEY) · gpt-* → OpenAI (OPENAI_API_KEY) ·
+#          claude-* → Anthropic Messages (ANTHROPIC_API_KEY). Missing key → soft mock.
+# CI / no keys: soft-falls to mock. Force mock with LLM_BACKEND=mock. Keep MODE=paper.
 llm:
   backend: http
   timeout_seconds: 30
   models:
-    technical: gpt-4o-mini      # Agent1 filter — cheaper-capable
-    news: gpt-4o-mini           # Agent2
-    risk_manager: gpt-4o        # Agent3
-    decision_maker: gpt-4o      # Agent4 final
+    technical: deepseek-chat         # Agent1 — cheap / high frequency
+    news: deepseek-chat              # Agent2 — cheap
+    risk_manager: gpt-4o-mini        # Agent3 — mid
+    decision_maker: claude-sonnet-4-5  # Agent4 — smarter (Anthropic Sonnet)
 
 # Best-effort API credit / balance alert → Telegram (orchestrator heartbeat / --loop).
 # Threshold also overridable via env API_CREDIT_WARN_USD. Optional manual OPENAI_CREDIT_USD.

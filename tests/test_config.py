@@ -54,10 +54,10 @@ def test_llm_and_news_defaults_from_yaml() -> None:
     cfg = load_yaml_config()
     assert cfg.llm.backend == "http"
     assert cfg.llm.timeout_seconds == 30
-    assert cfg.llm.models.technical == "gpt-4o-mini"
-    assert cfg.llm.models.news == "gpt-4o-mini"
-    assert cfg.llm.models.risk_manager == "gpt-4o"
-    assert cfg.llm.models.decision_maker == "gpt-4o"
+    assert cfg.llm.models.technical == "deepseek-chat"
+    assert cfg.llm.models.news == "deepseek-chat"
+    assert cfg.llm.models.risk_manager == "gpt-4o-mini"
+    assert cfg.llm.models.decision_maker == "claude-sonnet-4-5"
     assert cfg.news.blackout_minutes == 30
     assert "USD" in cfg.news.high_impact_currencies
     assert cfg.api_credit.warn_usd == 1.0

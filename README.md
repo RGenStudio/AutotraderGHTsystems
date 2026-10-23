@@ -41,24 +41,24 @@ On Linux, `create_market_data_provider()` automatically selects the **mock/fixtu
 
 All model calls go through **`LLMClient`** (HTTP wrapper + pydantic schema validation + timeout). CI uses `MockLLMBackend` — no real API keys.
 
-| Agent | Role | Model slot (config) | Default model id |
-|---|---|---|---|
-| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` | `gpt-4o-mini` |
-| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` | `gpt-4o-mini` |
-| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` | `gpt-4o` |
-| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` | `gpt-4o` |
+| Agent | Role | Model slot (config) | Default model id | Env key |
+|---|---|---|---|---|
+| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
 
-Default `llm.backend` is **`http`**. CI / no keys soft-falls to mock. You may set all four models to `gpt-4o` if preferred.
+Default `llm.backend` is **`http`**. Brief principle: cheap models filter first; Claude decides last. CI / missing key for that agent soft-falls to mock (loop continues).
 
 ### Enable real LLM (paper / Windows)
 
-1. Put at least one key in local `.env`: `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`.
-2. Optional: `LLM_BACKEND=http` (already the YAML default) or `LLM_BACKEND=mock` to force mock.
-3. `LLM_BASE_URL` — optional for OpenAI (`https://api.openai.com/v1`) and DeepSeek (`https://api.deepseek.com`); required for other OpenAI-compatible gateways. Anthropic’s native API is **not** chat-completions compatible — use a compatible base URL if you pass an Anthropic key.
-4. Model ids default to `gpt-4o-mini` / `gpt-4o` in `config.yaml` — change there if you use DeepSeek etc.
+1. Put keys in local `.env` for the agents you want live: `DEEPSEEK_API_KEY` (1–2), `OPENAI_API_KEY` (3), `ANTHROPIC_API_KEY` (4).
+2. Optional: `LLM_BACKEND=http` (YAML default) or `LLM_BACKEND=mock` to force mock.
+3. Routing by model id: `deepseek-*` → DeepSeek (`https://api.deepseek.com`) · `gpt-*` → OpenAI (`https://api.openai.com/v1`, override with `LLM_BASE_URL`) · `claude-*` → Anthropic **Messages** API (`https://api.anthropic.com/v1/messages`).
+4. Model ids default as in the table above (`config/config.yaml`).
 5. Run: `python -m autotrader run --once` (add `--mt5-data` on Windows with `MT5_*` filled for live demo candles). Execution stays **paper** (no MT5 `order_send`).
 
-`LLM_BACKEND=mock` always forces mock. Missing key/base URL with `http` requested → soft fallback to mock (logged).
+`LLM_BACKEND=mock` always forces mock. Missing key for a model’s provider → soft mock for that call only (logged).
 
 ### API credit low alert (Telegram)
 
@@ -68,6 +68,7 @@ When the orchestrator runs (including `--loop`), it best-effort probes remaining
 - OpenAI: tries known credit-grants endpoints; **most API keys cannot read prepaid balance** — set optional manual `OPENAI_CREDIT_USD` (update when you top up).
 - Anthropic: skipped (no simple remaining-balance API).
 - Never logs full API keys.
+
 ```python
 from datetime import UTC, datetime
 from autotrader.agents.pipeline import build_agent_pipeline

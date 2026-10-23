@@ -122,16 +122,16 @@ class ActiveWindow(BaseModel):
 
 class LLMModels(BaseModel):
     """
-    Model slots by role (real capability defaults).
+    Model slots by role (brief page 8 — cheap filter first, smarter last).
 
-    Agents 1–2 stay on a cheaper-capable model; Agents 3–4 use gpt-4o.
-    Override all four to ``gpt-4o`` in YAML if preferred.
+    Agents 1–2: DeepSeek cheap tier · Agent 3: OpenAI mid · Agent 4: Claude Sonnet.
+    Per-model routing + soft mock when that provider's key is missing.
     """
 
-    technical: str = "gpt-4o-mini"
-    news: str = "gpt-4o-mini"
-    risk_manager: str = "gpt-4o"
-    decision_maker: str = "gpt-4o"
+    technical: str = "deepseek-chat"
+    news: str = "deepseek-chat"
+    risk_manager: str = "gpt-4o-mini"
+    decision_maker: str = "claude-sonnet-4-5"
 
 
 class LLMConfig(BaseModel):
