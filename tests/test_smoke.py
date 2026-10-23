@@ -29,6 +29,7 @@ def test_env_example_lists_required_keys_empty() -> None:
         "MT5_PATH=",
         "TELEGRAM_BOT_TOKEN=",
         "TELEGRAM_CHAT_ID=",
+        "LLM_BACKEND=",
         "OPENAI_API_KEY=",
         "ANTHROPIC_API_KEY=",
         "DEEPSEEK_API_KEY=",

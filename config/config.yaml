@@ -43,14 +43,16 @@ news:
 
 # LLMClient (M5). Default backend=mock so CI needs no API keys.
 # Keys / LLM_BASE_URL stay in local `.env` only.
+# Real LLM: set backend=http (or env LLM_BACKEND=http) + API key; replace model
+# ids below (examples: gpt-4o-mini / gpt-4o, or deepseek-chat). Keep MODE=paper.
 llm:
   backend: mock  # mock | http
   timeout_seconds: 30
   models:
-    technical: mock-cheap
-    news: mock-cheap
-    risk_manager: mock-mid
-    decision_maker: mock-strong
+    technical: mock-cheap       # Agent 1 — cheap slot
+    news: mock-cheap            # Agent 2 — cheap slot
+    risk_manager: mock-mid      # Agent 3 — mid slot
+    decision_maker: mock-strong # Agent 4 — stronger slot
 
 # M8 paper A/B harness (synthetic/mock cycles — not a multi-week live paper run).
 # ab_mode: rules_only | rules_plus_ai | both
