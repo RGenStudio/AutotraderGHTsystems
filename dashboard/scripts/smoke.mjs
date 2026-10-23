@@ -14,6 +14,7 @@ const FORBIDDEN = [
   /["'`]\/api\/execute["'`]/i,
   /["'`]\/api\/trade\/(open|close|place)["'`]/i,
   /order_send\s*\(/i,
+  /NEXT_PUBLIC_[A-Z0-9_]*(DATABASE_URL|SERVICE_ROLE|PASSWORD)/,
 ];
 
 function walk(dir) {

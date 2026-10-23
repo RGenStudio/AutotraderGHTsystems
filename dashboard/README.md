@@ -1,41 +1,46 @@
-# AutoTrader ops dashboard (M7)
+# AutoTrader ops dashboard
 
-Read-only web UI for **ght.systems** — recent decisions, trades, system events, and a **kill switch** control.
+Read-only web UI for **ght.systems** — engine status, paper PnL, recent trades, decisions, signals, system events (heartbeats), and a kill-switch view.
 
 The **Python trading engine** (Windows + MT5) remains the source of truth. This app:
 
 - **Does not** place, modify, or cancel MT5 orders
 - **Has no** `/api/order`, `/api/execute`, or similar endpoints
-- Ships with **demo data** suitable for Vercel serverless (SQLite on the engine host does not persist on Vercel)
+- Reads the same SQL tables the engine writes when a server-side database env var is set
 
 ## Stack
 
 - Next.js (App Router) + TypeScript + Tailwind CSS
 - Deploy target: **Vercel** (root directory = `dashboard/`)
-- Domain intent: **`ght.systems`**
+- Domain: **`ght.systems`**
 
-## Data modes
+## Data source
 
-| `DASHBOARD_DATA_MODE` | Behavior |
+| Server env | What the page shows |
 |---|---|
-| `demo` (default) | Static demo journal JSON + local/ephemeral kill-switch file |
-| `api` | `GET` `ENGINE_JOURNAL_URL` for live JSON; falls back to demo on failure |
+| `DATABASE_URL` = Postgres URI (Supabase **transaction** pooler, port **6543**) | Live rows via `postgres` (prepared statements off, SSL required) |
+| or `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (only if `DATABASE_URL` is empty) | Live rows via the service role. Never `NEXT_PUBLIC_` |
+| Neither, and the app is on Vercel | **Database not configured** — empty tables, no sample trades |
+| Neither, local `next dev` | Sample journal (`DASHBOARD_DATA_MODE` defaults to demo off Vercel) |
 
-**Production journal sync** (engine SQLite → Supabase → dashboard) is a later milestone. On Vercel, prefer `demo` until that exists.
+Query failures stay on an error state. They do not fall back to sample trades.
 
-Kill-switch POST writes a flag file (`.data/kill-switch.json` locally, `/tmp` on Vercel). It is **not** automatically mirrored into the Windows engine until shared store sync lands.
+Tables read: `trades`, `decisions`, `signals`, `system_events` (heartbeat / engine_up / engine_down), `kill_switch_state`. Paper PnL is `sum(trades.pnl)` for rows that are not `open`.
+
+The Windows engine should use the **session** pooler (port **5432**) in its own `DATABASE_URL`. Do not point the long-running process at port 6543.
 
 ## Required / optional env
 
-See `.env.example`.
+See `.env.example`. Names only — no secrets in git.
 
 | Variable | Required | Notes |
 |---|---|---|
 | `DASHBOARD_PASSWORD` | Recommended in production | Middleware password gate; empty = open access (local/dev) |
 | `DASHBOARD_SESSION_SECRET` | Optional | HMAC pepper; defaults to password |
-| `DASHBOARD_DATA_MODE` | Optional | `demo` \| `api` (default `demo`) |
-| `ENGINE_JOURNAL_URL` | Only for `api` | HTTPS JSON feed |
-| `DASHBOARD_KILL_SWITCH_PATH` | Optional | Override kill-switch JSON path |
+| `DATABASE_URL` | For live data | Transaction pooler URI, port 6543, server-only |
+| `SUPABASE_URL` | Alternative | Project URL, server-only |
+| `SUPABASE_SERVICE_ROLE_KEY` | Alternative | Service role, server-only, bypasses RLS |
+| `DASHBOARD_DATA_MODE` | Optional | Local `demo` sample data. Ignored on Vercel when no database env is set |
 
 ## Local run
 
@@ -58,43 +63,25 @@ npm run test:smoke
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/health` | Public liveness (`placesOrders: false`) |
+| `GET` | `/api/health` | Public liveness (`placesOrders: false`, `dataMode`) |
 | `POST` | `/api/auth/login` | Set session cookie |
 | `POST` | `/api/auth/logout` | Clear session |
-| `GET` | `/api/journal` | Read-only decisions / trades / events |
-| `GET` | `/api/kill-switch` | Read kill-switch state |
-| `POST` | `/api/kill-switch` | `{ "action": "engage"\|"clear", "reason": "…" }` |
+| `GET` | `/api/journal` | Read-only journal snapshot |
+| `GET` | `/api/kill-switch` | Read the local demo flag (not the engine row) |
+| `POST` | `/api/kill-switch` | Local demo flag only. Live mode does not write the engine kill switch |
 
-## Vercel deploy
+## Vercel
 
-### Project settings
-
-1. Import **RGenStudio/AutotraderGHTsystems** in Vercel.
-2. Set **Root Directory** to `dashboard`.
-3. Framework preset: Next.js.
-4. Env vars: at least `DASHBOARD_PASSWORD`, `DASHBOARD_DATA_MODE=demo`.
+1. Root Directory = `dashboard`.
+2. Env (Production): `DASHBOARD_PASSWORD`, and `DATABASE_URL` **or** `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+3. Redeploy after env changes. Until `DATABASE_URL` / Supabase keys exist, production shows **Database not configured**.
 
 ### CLI (when `VERCEL_TOKEN` is available)
 
 ```bash
 cd dashboard
 npx vercel --token "$VERCEL_TOKEN" --prod --yes
-# Optional if org/project known:
-# VERCEL_ORG_ID=… VERCEL_PROJECT_ID=… npx vercel --prod --yes --token "$VERCEL_TOKEN"
 ```
-
-### Custom domain `ght.systems`
-
-In Vercel → Project → Settings → Domains → add `ght.systems` (and `www` if desired).
-
-DNS at the registrar (exact records Vercel shows; typically):
-
-| Type | Name | Value |
-|---|---|---|
-| `A` | `@` | `76.76.21.21` (confirm in Vercel UI) |
-| `CNAME` | `www` | `cname.vercel-dns.com` (confirm in Vercel UI) |
-
-Bartender: add GitHub/Actions or Cursor secret **`VERCEL_TOKEN`** (and optionally `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID`) so agents can deploy without inventing credentials.
 
 ## Hard rules
 

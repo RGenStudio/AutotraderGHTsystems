@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -13,11 +14,17 @@ from autotrader.config import (
     maybe_warn_missing_dotenv,
     require_non_live_mode,
 )
-from autotrader.db import resolve_database_url
+from autotrader.db import (
+    DB_RETRY_SECONDS,
+    is_database_connectivity_error,
+    redact_database_url,
+    resolve_database_url,
+    safe_exception_text,
+)
 from autotrader.execution.factory import LiveModeForbiddenError
 from autotrader.llm.factory import resolve_llm_backend_name, should_force_mock_llm
 from autotrader.logging_setup import setup_logging
-from autotrader.orchestrator.cycle import build_orchestrator
+from autotrader.orchestrator.cycle import Orchestrator, build_orchestrator
 from autotrader.orchestrator.scheduler import SimpleIntervalScheduler
 from autotrader.paper_ab.cli import main as paper_ab_main
 from autotrader.telegram.notifier import create_telegram_notifier
@@ -30,7 +37,8 @@ def _print_smoke(config) -> None:
     print(f"MODE={config.mode.value}")
     if config.mode == Mode.PAPER:
         print("execution=paper (no real MT5 order_send)")
-    print(f"database={resolve_database_url()}")
+    # Never print the database password (Supabase URI userinfo).
+    print(f"database={redact_database_url(resolve_database_url())}")
     # Effective backend (env LLM_BACKEND overrides YAML llm.backend).
     print(f"llm_backend={resolve_llm_backend_name(config_backend=config.llm.backend)}")
     print(f"ab_mode={config.paper_ab.ab_mode.value}")
@@ -65,12 +73,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     # CI / default: mock data + mock LLM. Real LLM when llm.backend=http
     # (or LLM_BACKEND=http) and API key + base URL are present.
     # --mt5-data prefers MT5 candles on Windows with MT5_* creds.
-    orch = build_orchestrator(
-        config=config,
-        force_mock_data=not args.mt5_data,
-        force_mock_llm=should_force_mock_llm(config_backend=config.llm.backend),
-        force_null_telegram=False,
-    )
+    # Postgres outages retry on --loop. They never silently swap in SQLite.
+    orch = _build_orchestrator_for_run(args, config)
+    if orch is None:
+        return 0 if args.loop else 1
 
     # Default (neither flag) and --once: single cycle. --loop: until Ctrl+C /
     # --max-cycles. Previously --once defaulted to True, so `--loop` still hit
@@ -100,6 +106,54 @@ def cmd_run(args: argparse.Namespace) -> int:
     results = scheduler.run_forever(max_cycles=args.max_cycles)
     print(f"scheduler cycles={len(results)}")
     return 0
+
+
+def _build_orchestrator_for_run(args: argparse.Namespace, config) -> Orchestrator | None:
+    """
+    Open the journal and wire the orchestrator.
+
+    ``--once`` fails the process when Postgres is unreachable.
+    ``--loop`` logs and retries; Ctrl+C returns None so the caller can exit 0.
+    """
+    kwargs = {
+        "config": config,
+        "force_mock_data": not args.mt5_data,
+        "force_mock_llm": should_force_mock_llm(config_backend=config.llm.backend),
+        "force_null_telegram": False,
+    }
+    while True:
+        try:
+            return build_orchestrator(**kwargs)
+        except KeyboardInterrupt:
+            logging.getLogger(__name__).info("stopped while connecting to the journal database")
+            if args.loop:
+                return None
+            raise
+        except Exception as exc:  # noqa: BLE001 — connectivity vs programmer errors
+            if not is_database_connectivity_error(exc):
+                raise
+            log = logging.getLogger(__name__)
+            log.error(
+                "Journal database unreachable (%s). "
+                "DATABASE_URL stays in effect — not falling back to SQLite.",
+                safe_exception_text(exc),
+            )
+            if not args.loop:
+                print(
+                    "ERROR: journal database unreachable. "
+                    "DATABASE_URL is set; not falling back to SQLite.",
+                    file=sys.stderr,
+                )
+                return None
+            log.error(
+                "Retrying journal connection in %.0fs (Ctrl+C to stop).",
+                DB_RETRY_SECONDS,
+            )
+            try:
+                time.sleep(DB_RETRY_SECONDS)
+            except KeyboardInterrupt:
+                log.info("stopped while waiting to retry the journal database")
+                return None
 
 
 def cmd_paper_ab(args: argparse.Namespace) -> int:

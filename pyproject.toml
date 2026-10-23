@@ -19,6 +19,8 @@ dependencies = [
   "numpy>=1.26",
   "SQLAlchemy>=2.0",
   "httpx>=0.27",
+  # psycopg v3 + Windows wheels. Installed by `pip install -e ".[mt5]"` (core dep).
+  "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]

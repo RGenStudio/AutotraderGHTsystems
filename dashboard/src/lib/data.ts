@@ -1,84 +1,121 @@
-import { DEMO_DECISIONS, DEMO_EVENTS, DEMO_NOTE, DEMO_TRADES } from "./demo-data";
+import "server-only";
+
+import {
+  DEMO_DECISIONS,
+  DEMO_EVENTS,
+  DEMO_NOTE,
+  DEMO_SIGNALS,
+  DEMO_TRADES,
+} from "./demo-data";
+import { explainQueryFailure, loadLiveSnapshot } from "./journal-db";
 import { readKillSwitch } from "./kill-switch-store";
-import type { Decision, JournalSnapshot, SystemEvent, Trade } from "./types";
+import { describeDataSource, liveBackend } from "./source";
+import type { JournalSnapshot, PnlSummary } from "./types";
 
-export type DataMode = "demo" | "api";
+export { describeDataSource as getDataMode } from "./source";
 
-export function getDataMode(): DataMode {
-  const raw = (process.env.DASHBOARD_DATA_MODE ?? "demo").trim().toLowerCase();
-  return raw === "api" ? "api" : "demo";
+const NO_ENGINE = {
+  state: "unknown" as const,
+  lastEventType: null,
+  lastEventAt: null,
+  message: "Journal database is not connected from this server.",
+};
+
+function pnlFromDemoTrades(): PnlSummary {
+  let openCount = 0;
+  let closedCount = 0;
+  let closedPnl = 0;
+  for (const trade of DEMO_TRADES) {
+    if (trade.status === "open") openCount += 1;
+    else {
+      closedCount += 1;
+      if (trade.pnl != null) closedPnl += trade.pnl;
+    }
+  }
+  return { openCount, closedCount, closedPnl };
 }
 
 function demoSnapshot(killSwitch: JournalSnapshot["killSwitch"]): JournalSnapshot {
+  const heartbeat = DEMO_EVENTS.find((row) => row.eventType === "heartbeat") ?? null;
   return {
     mode: "demo",
     generatedAt: new Date().toISOString(),
     note: DEMO_NOTE,
+    error: null,
     killSwitch,
+    killSwitchSource: "local",
     decisions: DEMO_DECISIONS,
     trades: DEMO_TRADES,
+    signals: DEMO_SIGNALS,
     systemEvents: DEMO_EVENTS,
+    engine: {
+      state: "up",
+      lastEventType: heartbeat?.eventType ?? "heartbeat",
+      lastEventAt: heartbeat?.createdAt ?? null,
+      message: heartbeat?.message ?? "Sample heartbeat",
+    },
+    pnl: pnlFromDemoTrades(),
   };
 }
 
-/**
- * Optional `api` mode: fetch JSON from ENGINE_JOURNAL_URL (HTTPS).
- * Expected shape matches JournalSnapshot fields (decisions/trades/systemEvents).
- * When unset or fetch fails, falls back to demo with a note — never invents orders.
- */
-async function apiSnapshot(
-  killSwitch: JournalSnapshot["killSwitch"],
-): Promise<JournalSnapshot> {
-  const url = process.env.ENGINE_JOURNAL_URL?.trim();
-  if (!url) {
-    return {
-      ...demoSnapshot(killSwitch),
-      mode: "api",
-      note:
-        "DASHBOARD_DATA_MODE=api but ENGINE_JOURNAL_URL is unset — showing demo data. Wire Supabase/engine sync later.",
-    };
-  }
+function blankSnapshot(
+  mode: JournalSnapshot["mode"],
+  note: string,
+  error: string | null,
+): JournalSnapshot {
+  return {
+    mode,
+    generatedAt: new Date().toISOString(),
+    note,
+    error,
+    killSwitch: {
+      active: false,
+      reason: "",
+      engagedAt: null,
+      updatedAt: new Date(0).toISOString(),
+    },
+    killSwitchSource: "local",
+    decisions: [],
+    trades: [],
+    signals: [],
+    systemEvents: [],
+    engine: mode === "error" ? { ...NO_ENGINE, message: "Journal query failed." } : NO_ENGINE,
+    pnl: { openCount: 0, closedCount: 0, closedPnl: null },
+  };
+}
 
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: "application/json" },
-      next: { revalidate: 30 },
-    });
-    if (!res.ok) {
-      throw new Error(`journal HTTP ${res.status}`);
-    }
-    const body = (await res.json()) as {
-      decisions?: Decision[];
-      trades?: Trade[];
-      systemEvents?: SystemEvent[];
-      killSwitch?: JournalSnapshot["killSwitch"];
-      note?: string;
-    };
-    return {
-      mode: "api",
-      generatedAt: new Date().toISOString(),
-      note:
-        body.note ??
-        "Live journal feed via ENGINE_JOURNAL_URL. Dashboard still cannot place MT5 orders.",
-      killSwitch: body.killSwitch ?? killSwitch,
-      decisions: body.decisions ?? [],
-      trades: body.trades ?? [],
-      systemEvents: body.systemEvents ?? [],
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      ...demoSnapshot(killSwitch),
-      mode: "api",
-      note: `ENGINE_JOURNAL_URL fetch failed (${message}) — demo fallback. Production sync via Supabase is later.`,
-    };
-  }
+function unconfiguredSnapshot(): JournalSnapshot {
+  return blankSnapshot(
+    "unconfigured",
+    "Database not configured. On Vercel, set DATABASE_URL to the Supabase transaction pooler URI (port 6543), or set both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Those values are server-only — never NEXT_PUBLIC_. The Windows engine uses its own DATABASE_URL (session pooler, port 5432). This page is not showing sample trades.",
+    null,
+  );
+}
+
+function misconfiguredSnapshot(): JournalSnapshot {
+  return blankSnapshot(
+    "error",
+    "DATABASE_URL is set but it is not a Postgres URI. This dashboard cannot open the engine's SQLite file. Use the Supabase transaction pooler URI (port 6543, sslmode=require) or SUPABASE_URL plus SUPABASE_SERVICE_ROLE_KEY.",
+    "DATABASE_URL is not a postgres:// or postgresql:// URI",
+  );
 }
 
 export async function loadJournal(): Promise<JournalSnapshot> {
-  const killSwitch = await readKillSwitch();
-  if (getDataMode() === "api") {
-    return apiSnapshot(killSwitch);
+  const backend = liveBackend();
+  if (backend === "invalid") return misconfiguredSnapshot();
+  if (backend === "postgres" || backend === "supabase") {
+    try {
+      return await loadLiveSnapshot(backend);
+    } catch (err) {
+      const detail = explainQueryFailure(err);
+      return {
+        ...blankSnapshot("error", detail, detail),
+        killSwitchSource: "journal",
+      };
+    }
   }
-  return demoSnapshot(killSwitch);
+  if (describeDataSource() === "demo") {
+    return demoSnapshot(await readKillSwitch());
+  }
+  return unconfiguredSnapshot();
 }
