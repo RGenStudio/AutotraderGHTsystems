@@ -3,9 +3,19 @@
 
 mode: paper
 
+# App-facing symbols. Use Market Watch names as-is (e.g. Exness EURUSDm), or keep
+# logical EURUSD/USDJPY and map them via symbol_map below.
 symbols:
   - EURUSD
   - USDJPY
+
+# Optional: logical name → broker wire name for MT5 copy_rates / symbol_select.
+# Exness Standard often suffixes "m" (EURUSDm, USDJPYm). Leave empty if symbols
+# already match Market Watch.
+# symbol_map:
+#   EURUSD: EURUSDm
+#   USDJPY: USDJPYm
+symbol_map: {}
 
 timeframes:
   entry: H1

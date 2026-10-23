@@ -336,6 +336,33 @@ Strategies follow the brief ADX regime: **ADX>25 → A or B**, **ADX<20 → C**,
 
 The live MT5 **data** path only works on a **Windows** machine with the Exness MT5 terminal installed and logged in. **Order send** remains paper/stub in M3 — do not send live orders.
 
+**Login ≠ rates.** A successful `MT5 initialize` / login only proves the terminal accepted credentials. `copy_rates_from_pos` can still return `None` with `(-1, 'Call failed')` when the symbol is not in Market Watch or the name does not match the broker (common on Exness). Treat those as separate failures.
+
+### Exness symbol suffixes
+
+Exness often exposes pairs as `EURUSDm` / `USDJPYm` (and similar), not bare `EURUSD`. Before rates, the adapter calls `symbol_select(symbol, True)` and retries `copy_rates` once. Configure one of:
+
+1. **Broker-native `symbols`** — set Market Watch names in `config/config.yaml`:
+
+   ```yaml
+   symbols:
+     - EURUSDm
+     - USDJPYm
+   ```
+
+2. **`symbol_map`** — keep logical app names and map to wire names:
+
+   ```yaml
+   symbols:
+     - EURUSD
+     - USDJPY
+   symbol_map:
+     EURUSD: EURUSDm
+     USDJPY: USDJPYm
+   ```
+
+If rates still fail, the error lists visible/matching symbols from `symbols_get` (names containing `EURUSD`, etc.) so you can copy the exact Market Watch spelling.
+
 1. Install **Exness MetaTrader 5** and log in to your **demo** account (EA/algo trading enabled). Prefer Standard MT5 demo, USD.
 2. Clone this repo on that Windows PC.
 3. Create a venv and install (include the optional MT5 extra):
@@ -363,7 +390,7 @@ The live MT5 **data** path only works on a **Windows** machine with the Exness M
 
    Leave `MT5_PATH` empty if the terminal is already running and discoverable.
 
-5. Keep MT5 open and logged in, then from the repo:
+5. Align **`symbols` / `symbol_map`** with Market Watch (see above), keep MT5 open and logged in, then from the repo:
 
    ```bat
    python -c "from autotrader.data import create_market_data_provider, Timeframe; p=create_market_data_provider(); print(len(p.fetch_candles('EURUSD', Timeframe.H1, count=10)))"

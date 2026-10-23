@@ -30,6 +30,7 @@ def create_market_data_provider(
     settings = env or EnvSettings()
     cfg = load_config()
     symbols = list(cfg.symbols)
+    symbol_map = dict(cfg.symbol_map) if cfg.symbol_map else None
 
     on_windows = sys.platform.startswith("win")
     has_login = bool(settings.mt5_login)
@@ -46,6 +47,7 @@ def create_market_data_provider(
             server=settings.mt5_server,
             path=settings.mt5_path,
             symbols=symbols,
+            symbol_map=symbol_map,
         )
 
     reason = []
