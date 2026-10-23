@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from autotrader.config import Mode
-from autotrader.db import create_db_engine, init_db, resolve_database_url
+from autotrader.db import (
+    create_db_engine,
+    init_db,
+    is_database_connectivity_error,
+    redact_database_url,
+    resolve_database_url,
+)
+from autotrader.db import engine as db_engine
 from autotrader.execution.types import ApprovedOrder, ExecutionResult, ExecutionStatus
 from autotrader.journal import (
     PersistentKillSwitch,
@@ -46,6 +55,140 @@ def test_resolve_database_url_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
     path = tmp_path / "custom.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
     assert resolve_database_url() == f"sqlite:///{path}"
+
+
+def test_resolve_database_url_blank_env_uses_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "   ")
+    url = resolve_database_url()
+    assert url.startswith("sqlite:///")
+    assert "postgres" not in url.split(":", 1)[0]
+
+
+def test_postgres_url_selected_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Postgres DATABASE_URL is kept (psycopg + SSL). Never rewritten to SQLite."""
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://postgres.ref:s3cret@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+    )
+    url = resolve_database_url()
+    assert url.startswith("postgresql+psycopg://")
+    assert url.split(":", 1)[0] != "sqlite"
+    assert "sqlite" not in url
+    assert "sslmode=require" in url
+    assert ":5432/" in url
+    assert "s3cret" in url  # driver URL keeps the secret; logs must not
+    shown = redact_database_url(url)
+    assert "s3cret" not in shown
+    assert "postgres.ref:***@" in shown
+
+
+def test_postgres_transaction_pooler_port_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    url = resolve_database_url(
+        override="postgres://u:p@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+    )
+    assert url.startswith("postgresql+psycopg://")
+    assert ":6543/" in url
+    assert "sslmode=require" in url
+    assert not url.startswith("sqlite")
+
+
+def test_postgres_sslmode_verify_full_preserved() -> None:
+    url = resolve_database_url(
+        override="postgresql://u:p@h.example:5432/postgres?sslmode=verify-full"
+    )
+    assert "sslmode=verify-full" in url
+    assert "sslmode=require" not in url
+    assert url.startswith("postgresql+psycopg://")
+
+
+def test_postgres_sslmode_disable_upgraded_to_require() -> None:
+    url = resolve_database_url(
+        override="postgresql://u:p@h.example:5432/postgres?sslmode=disable"
+    )
+    assert "sslmode=require" in url
+    assert "disable" not in url
+
+
+def test_create_db_engine_postgres_does_not_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Selecting the Postgres URL must not dial Supabase in CI."""
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://u:pw@db.example:5432/postgres",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_create_engine(url: str, **kwargs: object) -> MagicMock:
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        engine = MagicMock()
+        engine.connect.side_effect = AssertionError("must not open a connection")
+        return engine
+
+    monkeypatch.setattr(db_engine, "create_engine", fake_create_engine)
+    monkeypatch.setattr(db_engine.event, "listen", lambda *_a, **_k: None)
+    create_db_engine()
+    assert str(captured["url"]).startswith("postgresql+psycopg://")
+    assert "sqlite" not in str(captured["url"])
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["pool_pre_ping"] is True
+    connect_args = kwargs["connect_args"]
+    assert isinstance(connect_args, dict)
+    assert connect_args["prepare_threshold"] is None
+    assert connect_args["connect_timeout"] == 10
+
+
+def test_init_db_postgres_url_is_not_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgres://u:secret@pooler.supabase.com:5432/postgres",
+    )
+    captured: dict[str, str] = {}
+
+    def fake_create_engine(url: str, **kwargs: object) -> MagicMock:
+        captured["url"] = url
+        engine = MagicMock()
+        engine.dialect.name = "not-postgresql"  # skip live RLS SQL
+        return engine
+
+    monkeypatch.setattr(db_engine, "create_engine", fake_create_engine)
+    monkeypatch.setattr(db_engine.event, "listen", lambda *_a, **_k: None)
+    init_db()
+    assert captured["url"].startswith("postgresql+psycopg://")
+    assert not captured["url"].startswith("sqlite")
+    assert "secret" in captured["url"]
+
+
+def test_sqlite_schema_error_is_not_connectivity() -> None:
+    err = OperationalError("SELECT", {}, Exception("no such table: decisions"))
+    assert is_database_connectivity_error(err) is False
+
+
+def test_journal_rls_sql_blocks_anon_without_policies() -> None:
+    from autotrader.db.engine import journal_rls_statements
+
+    sql = journal_rls_statements()
+    assert "ENABLE ROW LEVEL SECURITY" in sql
+    assert "CREATE POLICY" not in sql
+    assert "REVOKE ALL ON TABLE public.trades FROM anon" in sql
+    assert "GRANT SELECT ON TABLE public.decisions TO service_role" in sql
+    for table in (
+        "signals",
+        "decisions",
+        "agent_calls",
+        "orders",
+        "trades",
+        "costs",
+        "system_events",
+        "kill_switch_state",
+    ):
+        assert f"public.{table}" in sql
+
+
+def test_postgres_disconnect_is_connectivity() -> None:
+    err = OperationalError("connect", {}, OSError("could not translate host name"))
+    assert is_database_connectivity_error(err) is True
 
 
 def test_sqlite_wal_mode(tmp_path: Path) -> None:

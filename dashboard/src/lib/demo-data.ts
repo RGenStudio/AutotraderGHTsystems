@@ -1,4 +1,4 @@
-import type { Decision, SystemEvent, Trade } from "./types";
+import type { Decision, Signal, SystemEvent, Trade } from "./types";
 
 /** Static demo journal — used on Vercel and local when DASHBOARD_DATA_MODE=demo. */
 export const DEMO_DECISIONS: Decision[] = [
@@ -145,5 +145,19 @@ export const DEMO_EVENTS: SystemEvent[] = [
   },
 ];
 
+export const DEMO_SIGNALS: Signal[] = [
+  {
+    id: 3,
+    createdAt: "2026-10-17T15:01:40.000Z",
+    symbol: "EURUSD",
+    strategy: "A",
+    side: "long",
+    entryPrice: 1.08452,
+    stopPrice: 1.0811,
+    takeProfit: 1.0913,
+    reason: "adx_trend",
+  },
+];
+
 export const DEMO_NOTE =
-  "Demo data mode — journal sync from the Windows engine (SQLite → Supabase) ships later. This dashboard never places MT5 orders.";
+  "Sample journal for local preview only — not live trades from the Windows engine. This page does not place MT5 orders.";

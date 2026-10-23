@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Engine, Select, select
 from sqlalchemy.orm import Session
 
 from autotrader.db.engine import (
@@ -52,9 +52,16 @@ class TradeJournal:
         session_factory: Callable[[], Session],
         *,
         database_url: str | None = None,
+        engine: Engine | None = None,
     ) -> None:
         self._session_factory = session_factory
         self.database_url = database_url
+        self._engine = engine
+
+    def dispose(self) -> None:
+        """Drop pooled connections so the next cycle dials again after an outage."""
+        if self._engine is not None:
+            self._engine.dispose()
 
     # --- writers -------------------------------------------------------------
 
@@ -467,11 +474,15 @@ def open_trade_journal(url: str | None = None) -> TradeJournal:
     Open (and create tables for) a journal at ``url`` or the resolved default.
 
     Default file: ``data/autotrader.db`` under the repo root (SQLite WAL).
+
+    A Postgres ``DATABASE_URL`` is used as-is (psycopg + SSL). This function does
+    not fall back to SQLite when that URL is set — connection errors propagate
+    so the caller can retry the cycle.
     """
     resolved = resolve_database_url(override=url)
     engine = init_db(create_db_engine(resolved))
     factory = make_session_factory(engine)
-    return TradeJournal(factory, database_url=resolved)
+    return TradeJournal(factory, database_url=resolved, engine=engine)
 
 
 def decisions_as_dicts(rows: Sequence[DecisionRow]) -> list[dict[str, Any]]:

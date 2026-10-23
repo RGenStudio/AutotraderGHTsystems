@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from autotrader.agents.calendar import StubNewsCalendar
 from autotrader.agents.pipeline import AgentPipeline
@@ -317,6 +318,41 @@ def test_scheduler_run_forever_max_cycles(journal) -> None:
     results = scheduler.run_forever(max_cycles=3)
     assert len(results) == 3
     assert len(sleeps) == 2
+    downs = journal.query_system_events(event_type=EVENT_ENGINE_DOWN)
+    assert downs and downs[-1].message == "scheduler_stop"
+
+
+def test_run_forever_retries_when_database_unreachable(journal) -> None:
+    """A dropped Postgres connection fails the cycle and the loop continues."""
+    orch = _make_orch(journal, symbols=["EURUSD"])
+    sleeps: list[float] = []
+    scheduler = SimpleIntervalScheduler(
+        orchestrator=orch,
+        interval=timedelta(hours=1),
+        sleep=lambda seconds: sleeps.append(seconds),
+    )
+    real = scheduler.run_once
+    calls = {"n": 0}
+
+    def flaky(*, now=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError(
+                "connect",
+                {},
+                OSError("temporary failure in name resolution"),
+            )
+        return real(now=now)
+
+    scheduler.run_once = flaky  # type: ignore[method-assign]
+    results = scheduler.run_forever(max_cycles=2)
+    assert calls["n"] == 2
+    assert results[0].status == "error"
+    assert results[0].reason == "database_unreachable"
+    assert "SQLite" not in results[0].errors[0]
+    assert results[1].status in {"ok", "skipped"}
+    # Outage waits the short retry, not the full H1 interval.
+    assert sleeps == [pytest.approx(30.0)]
     downs = journal.query_system_events(event_type=EVENT_ENGINE_DOWN)
     assert downs and downs[-1].message == "scheduler_stop"
 

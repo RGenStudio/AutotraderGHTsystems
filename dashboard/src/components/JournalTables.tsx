@@ -1,4 +1,4 @@
-import type { Decision, SystemEvent, Trade } from "@/lib/types";
+import type { Decision, Signal, SystemEvent, Trade } from "@/lib/types";
 import { formatNum, formatPnl, formatUtc } from "./format";
 
 function EmptyRow({ cols, label }: { cols: number; label: string }) {
@@ -14,7 +14,13 @@ function EmptyRow({ cols, label }: { cols: number; label: string }) {
   );
 }
 
-export function DecisionsTable({ rows }: { rows: Decision[] }) {
+export function DecisionsTable({
+  rows,
+  emptyLabel = "No decisions",
+}: {
+  rows: Decision[];
+  emptyLabel?: string;
+}) {
   return (
     <section className="border border-[var(--border)] bg-[var(--bg-panel)]">
       <header className="border-b border-[var(--border)] px-4 py-3">
@@ -35,7 +41,7 @@ export function DecisionsTable({ rows }: { rows: Decision[] }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <EmptyRow cols={5} label="No decisions" />
+              <EmptyRow cols={5} label={emptyLabel} />
             ) : (
               rows.map((row) => (
                 <tr
@@ -71,7 +77,13 @@ export function DecisionsTable({ rows }: { rows: Decision[] }) {
   );
 }
 
-export function TradesTable({ rows }: { rows: Trade[] }) {
+export function TradesTable({
+  rows,
+  emptyLabel = "No trades",
+}: {
+  rows: Trade[];
+  emptyLabel?: string;
+}) {
   return (
     <section className="border border-[var(--border)] bg-[var(--bg-panel)]">
       <header className="border-b border-[var(--border)] px-4 py-3">
@@ -94,7 +106,7 @@ export function TradesTable({ rows }: { rows: Trade[] }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <EmptyRow cols={7} label="No trades" />
+              <EmptyRow cols={7} label={emptyLabel} />
             ) : (
               rows.map((row) => (
                 <tr
@@ -137,7 +149,13 @@ export function TradesTable({ rows }: { rows: Trade[] }) {
   );
 }
 
-export function EventsTable({ rows }: { rows: SystemEvent[] }) {
+export function EventsTable({
+  rows,
+  emptyLabel = "No events",
+}: {
+  rows: SystemEvent[];
+  emptyLabel?: string;
+}) {
   return (
     <section className="border border-[var(--border)] bg-[var(--bg-panel)]">
       <header className="border-b border-[var(--border)] px-4 py-3">
@@ -156,7 +174,7 @@ export function EventsTable({ rows }: { rows: SystemEvent[] }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <EmptyRow cols={3} label="No events" />
+              <EmptyRow cols={3} label={emptyLabel} />
             ) : (
               rows.map((row) => (
                 <tr
@@ -168,6 +186,63 @@ export function EventsTable({ rows }: { rows: SystemEvent[] }) {
                   </td>
                   <td className="px-3 py-2 font-mono text-[12px]">{row.eventType}</td>
                   <td className="px-3 py-2 text-[var(--text-muted)]">{row.message}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+export function SignalsTable({
+  rows,
+  emptyLabel = "No signals",
+}: {
+  rows: Signal[];
+  emptyLabel?: string;
+}) {
+  return (
+    <section className="border border-[var(--border)] bg-[var(--bg-panel)]">
+      <header className="border-b border-[var(--border)] px-4 py-3">
+        <h2 className="m-0 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+          Recent signals
+        </h2>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="min-w-[640px] text-left text-sm">
+          <thead className="text-[11px] uppercase tracking-wide text-[var(--text-dim)]">
+            <tr className="border-b border-[var(--border)]">
+              <th className="px-3 py-2 font-medium">UTC</th>
+              <th className="px-3 py-2 font-medium">Symbol</th>
+              <th className="px-3 py-2 font-medium">Strategy</th>
+              <th className="px-3 py-2 font-medium">Side</th>
+              <th className="px-3 py-2 font-medium">Entry</th>
+              <th className="px-3 py-2 font-medium">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <EmptyRow cols={6} label={emptyLabel} />
+            ) : (
+              rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className="border-b border-[var(--border)]/70 last:border-0"
+                >
+                  <td className="px-3 py-2 font-mono text-[12px] tabular text-[var(--text-muted)]">
+                    {formatUtc(row.createdAt)}
+                  </td>
+                  <td className="px-3 py-2 font-mono">{row.symbol}</td>
+                  <td className="px-3 py-2 font-mono">{row.strategy}</td>
+                  <td className="px-3 py-2 font-mono">{row.side}</td>
+                  <td className="px-3 py-2 font-mono tabular">
+                    {formatNum(row.entryPrice, 5)}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[12px] text-[var(--text-muted)]">
+                    {row.reason || "—"}
+                  </td>
                 </tr>
               ))
             )}

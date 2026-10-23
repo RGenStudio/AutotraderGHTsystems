@@ -14,6 +14,7 @@ from autotrader.config import AppConfig, Mode, load_config, require_non_live_mod
 from autotrader.data.factory import create_market_data_provider
 from autotrader.data.provider import MarketDataProvider
 from autotrader.data.types import Timeframe
+from autotrader.db.engine import is_database_connectivity_error, safe_exception_text
 from autotrader.execution.factory import create_execution_backend
 from autotrader.execution.protocol import ExecutionBackend
 from autotrader.execution.types import ApprovedOrder, ExecutionStatus
@@ -199,8 +200,17 @@ class Orchestrator:
             try:
                 symbol_results.append(self._run_symbol(symbol, instant))
             except Exception as exc:  # noqa: BLE001 — per-symbol isolation
-                logger.exception("symbol cycle failed for %s", symbol)
-                err = f"{type(exc).__name__}: {exc}"
+                if is_database_connectivity_error(exc):
+                    # Do not logger.exception — the traceback can embed the URI.
+                    logger.error(
+                        "symbol cycle database error for %s: %s",
+                        symbol,
+                        safe_exception_text(exc),
+                    )
+                    err = safe_exception_text(exc)
+                else:
+                    logger.exception("symbol cycle failed for %s", symbol)
+                    err = f"{type(exc).__name__}: {exc}"
                 errors.append(f"{symbol}: {err}")
                 self._soft_notify_error(symbol=symbol, reason="cycle_exception", detail=err)
                 self.journal.record_system_event(

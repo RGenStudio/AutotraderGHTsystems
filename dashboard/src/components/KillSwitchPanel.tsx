@@ -7,9 +7,11 @@ import { formatUtc } from "./format";
 type Props = {
   initial: KillSwitchState;
   onChanged?: (state: KillSwitchState) => void;
+  /** Engine journal row — display only. The Windows process owns engage/clear. */
+  readOnly?: boolean;
 };
 
-export function KillSwitchPanel({ initial, onChanged }: Props) {
+export function KillSwitchPanel({ initial, onChanged, readOnly = false }: Props) {
   const [state, setState] = useState(initial);
   const [reason, setReason] = useState("dashboard_operator");
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +60,9 @@ export function KillSwitchPanel({ initial, onChanged }: Props) {
             Kill switch
           </h2>
           <p className="mt-1 mb-0 text-sm text-[var(--text-dim)]">
-            Pauses new entries in the dashboard flag. Does not place or cancel MT5
-            orders.
+            {readOnly
+              ? "Read from the engine journal (kill_switch_state). This page cannot engage or clear it and cannot send MT5 orders."
+              : "Local dashboard flag only. It does not update the engine journal and does not place or cancel MT5 orders."}
           </p>
         </div>
         <span
@@ -92,6 +95,7 @@ export function KillSwitchPanel({ initial, onChanged }: Props) {
         </div>
       </dl>
 
+      {readOnly ? null : (
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           <span className="text-[var(--text-dim)]">Engage reason</span>
@@ -123,6 +127,7 @@ export function KillSwitchPanel({ initial, onChanged }: Props) {
           </button>
         </div>
       </div>
+      )}
       {error ? (
         <p className="mt-3 mb-0 text-sm text-[var(--danger)]" role="alert">
           {error}

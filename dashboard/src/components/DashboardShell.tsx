@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { JournalSnapshot } from "@/lib/types";
 import { KillSwitchPanel } from "./KillSwitchPanel";
-import { DecisionsTable, EventsTable, TradesTable } from "./JournalTables";
+import { JournalSummary } from "./JournalSummary";
+import { DecisionsTable, EventsTable, SignalsTable, TradesTable } from "./JournalTables";
 import { LogoutButton } from "./LogoutButton";
 import { formatUtc } from "./format";
 
@@ -14,6 +15,34 @@ type Props = {
 
 export function DashboardShell({ snapshot, authConfigured }: Props) {
   const [killSwitch, setKillSwitch] = useState(snapshot.killSwitch);
+  const journalOwned = snapshot.killSwitchSource === "journal";
+  const bannerClass =
+    snapshot.mode === "error"
+      ? "border-[var(--danger)]"
+      : snapshot.mode === "live"
+        ? "border-[var(--ok)]"
+        : "border-[var(--warn)]";
+  const empty =
+    snapshot.mode === "live"
+      ? {
+          decisions: "No decisions in the journal yet",
+          trades: "No trades in the journal yet",
+          signals: "No signals in the journal yet",
+          events: "No system events yet",
+        }
+      : snapshot.mode === "demo"
+        ? {
+            decisions: "No decisions",
+            trades: "No trades",
+            signals: "No signals",
+            events: "No events",
+          }
+        : {
+            decisions: "Not loaded",
+            trades: "Not loaded",
+            signals: "Not loaded",
+            events: "Not loaded",
+          };
 
   return (
     <div className="mx-auto min-h-screen max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
@@ -46,18 +75,30 @@ export function DashboardShell({ snapshot, authConfigured }: Props) {
         </div>
       </header>
 
-      <p className="mb-5 border-l-2 border-[var(--warn)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-muted)]">
+      <p
+        className={`mb-5 border-l-2 bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-muted)] ${bannerClass}`}
+        role={snapshot.mode === "error" ? "alert" : "status"}
+      >
         {snapshot.note}
       </p>
 
       <div className="mb-6">
-        <KillSwitchPanel initial={killSwitch} onChanged={setKillSwitch} />
+        <JournalSummary engine={snapshot.engine} pnl={snapshot.pnl} />
+      </div>
+
+      <div className="mb-6">
+        <KillSwitchPanel
+          initial={journalOwned ? snapshot.killSwitch : killSwitch}
+          onChanged={journalOwned ? undefined : setKillSwitch}
+          readOnly={journalOwned}
+        />
       </div>
 
       <div className="grid gap-5">
-        <DecisionsTable rows={snapshot.decisions} />
-        <TradesTable rows={snapshot.trades} />
-        <EventsTable rows={snapshot.systemEvents} />
+        <TradesTable rows={snapshot.trades} emptyLabel={empty.trades} />
+        <DecisionsTable rows={snapshot.decisions} emptyLabel={empty.decisions} />
+        <SignalsTable rows={snapshot.signals} emptyLabel={empty.signals} />
+        <EventsTable rows={snapshot.systemEvents} emptyLabel={empty.events} />
       </div>
 
       <footer className="mt-8 border-t border-[var(--border)] pt-4 text-xs text-[var(--text-dim)]">

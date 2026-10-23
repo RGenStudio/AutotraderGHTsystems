@@ -201,18 +201,21 @@ The harness itself needs **no MT5** (synthetic cycles work on Linux CI and Windo
 3. Use the orchestrator for live-demo H1 cycles (`python -m autotrader run --once --mt5-data`) while the A/B harness remains the **offline comparator** + gate checker.
 4. Document closed trades / weeks in the trade journal; promote to small live capital only after human review — this CLI will not flip `MODE` for you.
 
-## Trade journal (SQLite / M4)
+## Trade journal (SQLite default / Postgres)
 
-Every Risk Engine decision (with **reason**), paper fill, and kill-switch change can be written to a local SQLite database (WAL mode) via SQLAlchemy.
+Every Risk Engine decision (with **reason**), paper fill, and kill-switch change is written through SQLAlchemy.
 
-**Where the DB file lives**
+**Where the journal lives**
 
 | Setting | Location |
 |---|---|
-| Default (no `DATABASE_URL`) | `data/autotrader.db` under the **repo root** |
-| Override | Set `DATABASE_URL` in local `.env` (e.g. `sqlite:///C:/path/to/data/autotrader.db`) |
+| `DATABASE_URL` empty | SQLite WAL file `data/autotrader.db` under the **repo root** |
+| `DATABASE_URL` Postgres URI | That database (Supabase). Tables are created on startup if missing. SSL is required. |
+| SQLite override | `DATABASE_URL=sqlite:///C:/path/to/data/autotrader.db` |
 
-The `data/` directory is gitignored (along with `*.db`). Tests always use a **temp** SQLite file — they never touch the default path.
+The Windows engine should use the Supabase **session pooler** (port **5432**). The Vercel dashboard reads the same tables via the **transaction pooler** (port **6543**) or the service role key. If Postgres is briefly unreachable, `run --loop` logs the error and retries the next cycle — it does **not** fall back to SQLite while `DATABASE_URL` is set.
+
+The `data/` directory is gitignored (along with `*.db`). Tests always use a **temp** SQLite file — they never touch the default path. `psycopg` (v3) is a core dependency, so `pip install -e ".[mt5]"` installs it on the Windows PC.
 
 **Inspect the journal**
 

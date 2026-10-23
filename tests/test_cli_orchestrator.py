@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import autotrader.__main__ as cli
 from autotrader.__main__ import build_parser, main
@@ -71,6 +72,54 @@ def test_run_loop_schedules_multiple_cycles(monkeypatch, capsys) -> None:
     # Sleep between cycles only (not after the final cycle).
     assert len(sleeps) == 2
     assert all(s == pytest.approx(3600.0) for s in sleeps)
+
+
+def test_smoke_redacts_postgres_password(monkeypatch, capsys) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://postgres.ref:s3cret@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+    )
+    code = main([])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "s3cret" not in out
+    assert "postgresql+psycopg://" in out
+    assert "***" in out
+    assert "not falling back" not in out.lower()
+
+
+def test_loop_retries_when_journal_unreachable_at_startup(monkeypatch, capsys, caplog) -> None:
+    calls = {"n": 0}
+    real_build = orch_cycle.build_orchestrator
+
+    def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError("connect", {}, OSError("could not connect to server"))
+        return real_build(**kwargs)
+
+    monkeypatch.setattr(cli, "build_orchestrator", flaky)
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
+    with caplog.at_level("ERROR"):
+        code = main(["run", "--loop", "--max-cycles", "1"])
+    assert code == 0
+    assert calls["n"] == 2
+    captured = capsys.readouterr()
+    assert "not falling back to SQLite" in caplog.text
+    assert "scheduler cycles=1" in captured.out
+
+
+def test_once_does_not_fall_back_when_postgres_unreachable(monkeypatch, capsys, caplog) -> None:
+    def boom(**_kwargs):
+        raise OperationalError("connect", {}, OSError("could not connect to server"))
+
+    monkeypatch.setattr(cli, "build_orchestrator", boom)
+    with caplog.at_level("ERROR"):
+        code = main(["run", "--once"])
+    assert code == 1
+    captured = capsys.readouterr()
+    assert "not falling back to SQLite" in caplog.text + captured.err
+    assert "cycle status=" not in captured.out
 
 
 def test_run_loop_keyboard_interrupt_stops_cleanly(monkeypatch, capsys) -> None:

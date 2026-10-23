@@ -1,4 +1,4 @@
-/** Shared journal shapes aligned with the Python Trade Journal (M4). */
+/** Shared journal shapes aligned with the Python Trade Journal. */
 
 export type KillSwitchState = {
   active: boolean;
@@ -35,6 +35,18 @@ export type Trade = {
   closedAt: string | null;
 };
 
+export type Signal = {
+  id: number;
+  createdAt: string;
+  symbol: string;
+  strategy: string;
+  side: string;
+  entryPrice: number;
+  stopPrice: number;
+  takeProfit: number | null;
+  reason: string;
+};
+
 export type SystemEvent = {
   id: number;
   createdAt: string;
@@ -42,14 +54,36 @@ export type SystemEvent = {
   message: string;
 };
 
+export type EngineStatus = {
+  state: "up" | "down" | "stale" | "unknown";
+  lastEventType: string | null;
+  lastEventAt: string | null;
+  message: string;
+};
+
+export type PnlSummary = {
+  openCount: number;
+  closedCount: number;
+  /** Sum of `trades.pnl` for non-open rows. Null when the journal was not read. */
+  closedPnl: number | null;
+};
+
+export type JournalMode = "demo" | "live" | "unconfigured" | "error";
+
 export type JournalSnapshot = {
-  mode: "demo" | "api";
+  mode: JournalMode;
   generatedAt: string;
   note: string;
+  error: string | null;
   killSwitch: KillSwitchState;
+  /** `journal` is the engine row in kill_switch_state. `local` is the dashboard file flag. */
+  killSwitchSource: "journal" | "local";
   decisions: Decision[];
   trades: Trade[];
+  signals: Signal[];
   systemEvents: SystemEvent[];
+  engine: EngineStatus;
+  pnl: PnlSummary;
 };
 
 export type KillSwitchAction = "engage" | "clear";
