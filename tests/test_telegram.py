@@ -1,6 +1,8 @@
-"""Telegram notifier — mock HTTP; soft-fail never raises."""
+"""Telegram notifier — mock HTTP; soft-fail never raises; never log full bot token."""
 
 from __future__ import annotations
+
+import logging
 
 import httpx
 import pytest
@@ -10,6 +12,7 @@ from autotrader.telegram import (
     NullTelegramNotifier,
     TelegramNotifier,
     create_telegram_notifier,
+    redact_telegram_secrets,
 )
 
 
@@ -81,3 +84,45 @@ def test_create_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(n, TelegramNotifier)
     assert n.bot_token == "env-tok"
     assert n.chat_id == "999"
+
+
+def test_redact_telegram_secrets_masks_bot_token() -> None:
+    token = "123456:ABC-DEF_secret"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    redacted = redact_telegram_secrets(url)
+    assert token not in redacted
+    assert "/bot***/sendMessage" in redacted
+    assert "https://api.telegram.org" in redacted
+
+
+def test_http_status_error_log_has_no_token(caplog: pytest.LogCaptureFixture) -> None:
+    token = "999888:LEAKED-TOKEN-VALUE"
+
+    class _RaiseStatus(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            response = httpx.Response(401, json={"ok": False}, request=request)
+            raise httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+
+    client = httpx.Client(transport=_RaiseStatus())
+    n = TelegramNotifier(bot_token=token, chat_id="123", http_client=client)
+    with caplog.at_level(logging.WARNING, logger="autotrader.telegram.notifier"):
+        assert n.send("hi") is False
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert token not in joined
+    assert "status=401" in joined
+    assert "/bot***/" in joined
+
+
+def test_http_error_log_redacts_url_embedded_token(caplog: pytest.LogCaptureFixture) -> None:
+    token = "111222:ANOTHER-LEAK"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    transport = _FakeTransport(
+        raise_exc=httpx.ConnectError(f"connection failed for {url}")
+    )
+    client = httpx.Client(transport=transport)
+    n = TelegramNotifier(bot_token=token, chat_id="123", http_client=client)
+    with caplog.at_level(logging.WARNING, logger="autotrader.telegram.notifier"):
+        assert n.send("hi") is False
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert token not in joined
+    assert "/bot***/" in joined
