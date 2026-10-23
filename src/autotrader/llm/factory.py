@@ -9,8 +9,9 @@ from typing import Any
 
 from autotrader.config import EnvSettings, load_config
 from autotrader.llm.client import CostHook, LLMClient
-from autotrader.llm.http import HttpxLLMBackend
 from autotrader.llm.mock import MockLLMBackend
+from autotrader.llm.providers import DEEPSEEK_CHAT_BASE, OPENAI_CHAT_BASE
+from autotrader.llm.routing import RoutingLLMBackend
 from autotrader.llm.types import LLMUsage
 
 # re-export for typing convenience
@@ -34,7 +35,7 @@ def resolve_llm_backend_name(
     Resolve ``mock`` vs ``http``.
 
     Precedence: ``LLM_BACKEND`` env (``mock``|``http``) → YAML ``llm.backend``
-    → default ``http``. Empty / whitespace env is treated as unset.
+    → default ``mock``. Empty / whitespace env is treated as unset.
     """
     settings = env or EnvSettings()
     raw = settings.llm_backend if settings.llm_backend is not None else os.environ.get(
@@ -44,7 +45,7 @@ def resolve_llm_backend_name(
     if env_backend in {"mock", "http"}:
         return env_backend
     name = (config_backend if config_backend is not None else load_config().llm.backend)
-    return str(name).strip().lower() or "http"
+    return str(name).strip().lower() or "mock"
 
 
 def should_force_mock_llm(*, config_backend: str | None = None) -> bool:
@@ -61,10 +62,12 @@ def create_llm_client(
     timeout_s: float | None = None,
 ) -> LLMClient:
     """
-    Prefer mock unless explicitly configured for HTTP and keys are present.
+    Prefer mock unless explicitly configured for HTTP.
 
-    Linux CI and paper smoke always work without API keys when
-    ``llm.backend`` is ``mock`` (default) or ``force_mock=True``.
+    With ``backend=http``, uses :class:`RoutingLLMBackend` so each agent model
+    hits the right provider (DeepSeek / OpenAI / Anthropic). Missing key for a
+    model soft-falls to mock for that call only — the loop does not crash.
+    ``LLM_BACKEND=mock`` / ``force_mock=True`` always forces the mock backend.
     """
     settings = env or EnvSettings()
     cfg = load_config()
@@ -85,21 +88,9 @@ def create_llm_client(
         logger.info("Using mock LLM backend")
         return LLMClient(backend, timeout_s=timeout, cost_hook=cost_hook)
 
-    base_url = _resolve_base_url(settings)
-    api_key = _first_api_key(settings)
-    if not base_url or not api_key:
-        logger.info(
-            "LLM HTTP requested but base URL/key missing — falling back to mock"
-        )
-        return LLMClient(
-            mock_backend or MockLLMBackend(),
-            timeout_s=timeout,
-            cost_hook=cost_hook,
-        )
-
-    logger.info("Using HTTP LLM backend base_url=%s", base_url)
+    logger.info("Using routing LLM backend (per-model OpenAI / DeepSeek / Anthropic)")
     return LLMClient(
-        HttpxLLMBackend(base_url=base_url, api_key=api_key),
+        RoutingLLMBackend(env=settings, mock_backend=mock_backend),
         timeout_s=timeout,
         cost_hook=cost_hook,
     )
@@ -146,6 +137,7 @@ def make_recording_cost_hook(
 
 
 def _first_api_key(settings: EnvSettings) -> str:
+    """Return the first non-empty provider key (legacy helper for tests)."""
     for value in (
         settings.openai_api_key,
         settings.anthropic_api_key,
@@ -158,18 +150,18 @@ def _first_api_key(settings: EnvSettings) -> str:
 
 def _resolve_base_url(settings: EnvSettings) -> str:
     """
-    Prefer ``LLM_BASE_URL``; otherwise infer a common OpenAI-compatible host.
+    Prefer ``LLM_BASE_URL``; otherwise infer OpenAI or DeepSeek chat host.
 
-    Anthropic's native Messages API is not OpenAI chat-completions compatible —
-    leave ``LLM_BASE_URL`` set to a compatible gateway if using Anthropic keys.
+    Anthropic uses the native Messages API (see :mod:`autotrader.llm.anthropic`)
+    and is not inferred here.
     """
     explicit = (settings.llm_base_url or "").strip()
     if explicit:
         return explicit
     if settings.openai_api_key and str(settings.openai_api_key).strip():
-        return "https://api.openai.com/v1"
+        return OPENAI_CHAT_BASE
     if settings.deepseek_api_key and str(settings.deepseek_api_key).strip():
-        return "https://api.deepseek.com"
+        return DEEPSEEK_CHAT_BASE
     return ""
 
 
