@@ -32,6 +32,7 @@ def test_yaml_paper_ab_defaults() -> None:
     assert cfg.paper_ab.ab_mode == AbMode.BOTH
     assert cfg.paper_ab.cycles == 50
     assert cfg.paper_ab.gates.min_closed_trades == 80
+    assert cfg.paper_ab.gates.min_weeks == 2
     assert cfg.paper_ab.gates.max_drawdown_pct == 8.0
     assert cfg.paper_ab.gates.max_bad_json_rate_pct == 3.0
     assert cfg.paper_ab.gates.ab_dd_tolerance_pp == 1.0
@@ -158,7 +159,7 @@ def test_gate_checker_fail_on_small_sample() -> None:
     gate = check_section13_gates(result)
     assert gate.live_enabled is False
     assert gate.mode_remains == "paper"
-    # 6-cycle fixture cannot meet 80 trades / 12 weeks
+    # 6-cycle fixture cannot meet 80 trades / 2 weeks
     assert gate.passed is False
     names = {c.name for c in gate.checks}
     assert "min_sample" in names
@@ -179,7 +180,7 @@ def test_gate_checker_pass_with_relaxed_thresholds(tmp_path: Path) -> None:
                 signal_rate=0.7,
                 gates=PaperGateThresholds(
                     min_closed_trades=20,
-                    max_calendar_weeks=1,
+                    min_weeks=1,
                     max_drawdown_pct=8.0,
                     min_net_return_pct=0.0,
                     min_expectancy_r=0.0,
@@ -213,7 +214,7 @@ def test_gate_never_enables_live() -> None:
         result,
         thresholds=PaperGateThresholds(
             min_closed_trades=1,
-            max_calendar_weeks=1,
+            min_weeks=1,
             max_drawdown_pct=100.0,
             min_net_return_pct=-100.0,
             min_expectancy_r=-100.0,

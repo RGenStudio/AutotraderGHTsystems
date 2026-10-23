@@ -65,8 +65,10 @@ def check_section13_gates(
     """
     Evaluate locked §13 paper criteria against harness metrics.
 
-    Minimum sample: **80 closed trades OR 12 calendar weeks** (whichever comes
-    first — both must be documented). Numeric thresholds are never weakened.
+    Minimum sample: **80 closed trades OR ``min_weeks`` calendar weeks**
+    (default 2 — weaker statistically than 12; Bartender accepted). Whichever
+    comes first; both dimensions are documented. Numeric risk/quality thresholds
+    are never weakened. Pass never enables ``MODE=live``.
     """
     th = thresholds or PaperGateThresholds()
     checks: list[GateCheckItem] = []
@@ -86,10 +88,10 @@ def check_section13_gates(
             summary="No arm metrics — cannot evaluate §13.",
         )
 
-    # --- Sample size (80 trades OR 12 weeks) ---
+    # --- Sample size (80 trades OR min_weeks) ---
     sample_ok = (
         primary.trades >= th.min_closed_trades
-        or primary.calendar_weeks >= th.max_calendar_weeks
+        or primary.calendar_weeks >= th.min_weeks
     )
     checks.append(
         GateCheckItem(
@@ -97,7 +99,7 @@ def check_section13_gates(
             passed=sample_ok,
             detail=(
                 f"trades={primary.trades} (need>={th.min_closed_trades}) OR "
-                f"weeks={primary.calendar_weeks:.2f} (need>={th.max_calendar_weeks}); "
+                f"weeks={primary.calendar_weeks:.2f} (need>={th.min_weeks}); "
                 f"arm={primary.arm.value}"
             ),
             applies_to=primary.arm.value,

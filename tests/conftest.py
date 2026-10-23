@@ -19,3 +19,6 @@ def _default_mode_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     if "MODE" not in os.environ:
         monkeypatch.setenv("MODE", Mode.PAPER.value)
+    # YAML default llm.backend is http; keep the suite on mock unless a test opts in.
+    if "LLM_BACKEND" not in os.environ:
+        monkeypatch.setenv("LLM_BACKEND", "mock")
