@@ -186,7 +186,7 @@ def test_mt5_symbol_map_uses_broker_wire_name() -> None:
 
 
 def test_mt5_preserves_broker_native_symbol_casing() -> None:
-    """Config ``EURUSDm`` must be sent to MT5 as-is (not uppercased to EURUSDM)."""
+    """Config ``EURUSDm`` must not be transformed to ``EURUSDM``."""
 
     class FakeMT5:
         TIMEFRAME_H1 = 16385
@@ -194,6 +194,7 @@ def test_mt5_preserves_broker_native_symbol_casing() -> None:
 
         def __init__(self) -> None:
             self.copy_symbols: list[str] = []
+            self.selected: list[str] = []
 
         def initialize(self, **kwargs: Any) -> bool:
             return True
@@ -202,6 +203,7 @@ def test_mt5_preserves_broker_native_symbol_casing() -> None:
             return (1, "ok")
 
         def symbol_select(self, symbol: str, enable: bool) -> bool:
+            self.selected.append(symbol)
             return True
 
         def symbols_get(self) -> list[_SymbolInfo]:
@@ -217,12 +219,86 @@ def test_mt5_preserves_broker_native_symbol_casing() -> None:
             return None
 
     fake = FakeMT5()
-    provider = MT5MarketDataProvider(symbols=["EURUSDm"], mt5_module=fake)
-    assert provider.available_symbols() == ["EURUSDM"]
+    provider = MT5MarketDataProvider(symbols=["EURUSDm", "USDJPYm"], mt5_module=fake)
+    assert provider.available_symbols() == ["EURUSDm", "USDJPYm"]
+    assert "EURUSDM" not in provider.available_symbols()
+    assert "USDJPYM" not in provider.available_symbols()
     bars = provider.fetch_candles("EURUSDm", Timeframe.H1, count=2)
     assert len(bars) == 2
-    assert bars[0].symbol == "EURUSDM"
+    assert bars[0].symbol == "EURUSDm"
+    assert bars[0].symbol != "EURUSDM"
+    assert fake.selected == ["EURUSDm"]
     assert fake.copy_symbols == ["EURUSDm"]
+    # Case-insensitive request still resolves to config spelling.
+    bars2 = provider.fetch_candles("eurusdm", Timeframe.H1, count=2)
+    assert bars2[0].symbol == "EURUSDm"
+
+
+def test_mt5_connect_log_shows_exact_broker_names(caplog: pytest.LogCaptureFixture) -> None:
+    class FakeMT5:
+        def initialize(self, **kwargs: Any) -> bool:
+            return True
+
+        def last_error(self) -> tuple[int, str]:
+            return (1, "ok")
+
+        def shutdown(self) -> None:
+            return None
+
+    import logging
+
+    provider = MT5MarketDataProvider(
+        symbols=["EURUSDm", "USDJPYm"],
+        mt5_module=FakeMT5(),
+    )
+    with caplog.at_level(logging.INFO, logger="autotrader.data.mt5"):
+        provider.connect()
+    joined = " ".join(r.message for r in caplog.records)
+    assert "EURUSDm" in joined
+    assert "USDJPYm" in joined
+    assert "EURUSDM" not in joined
+    assert "USDJPYM" not in joined
+
+
+def test_mt5_copy_rates_error_mentions_case_when_symbol_select_fails() -> None:
+    class FakeMT5:
+        TIMEFRAME_H1 = 16385
+        TIMEFRAME_H4 = 16388
+
+        def initialize(self, **kwargs: Any) -> bool:
+            return True
+
+        def last_error(self) -> tuple[int, str]:
+            return (-1, "Call failed")
+
+        def symbol_select(self, symbol: str, enable: bool) -> bool:
+            # Simulate wrong casing: EURUSDM is not selectable; broker has EURUSDm.
+            return symbol == "EURUSDm"
+
+        def symbols_get(self) -> list[_SymbolInfo]:
+            return [_SymbolInfo("EURUSDm"), _SymbolInfo("USDJPYm")]
+
+        def copy_rates_from_pos(
+            self, symbol: str, timeframe: int, start_pos: int, count: int
+        ) -> None:
+            return None
+
+        def shutdown(self) -> None:
+            return None
+
+    # Force wire name to the wrong case via symbol_map value.
+    provider = MT5MarketDataProvider(
+        symbols=["EURUSD"],
+        symbol_map={"EURUSD": "EURUSDM"},
+        mt5_module=FakeMT5(),
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        provider.fetch_candles("EURUSD", Timeframe.H1, count=5)
+    msg = str(excinfo.value)
+    assert "symbol_select" in msg
+    assert "case-sensitive" in msg
+    assert "EURUSDm" in msg
+    assert "EURUSDM" in msg
 
 
 def test_mt5_copy_rates_retries_after_symbol_select() -> None:
