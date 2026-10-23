@@ -28,14 +28,19 @@ logger = logging.getLogger(__name__)
 def resolve_llm_backend_name(
     *,
     config_backend: str | None = None,
+    env: EnvSettings | None = None,
 ) -> str:
     """
     Resolve ``mock`` vs ``http``.
 
     Precedence: ``LLM_BACKEND`` env (``mock``|``http``) → YAML ``llm.backend``
-    → default ``mock``.
+    → default ``mock``. Empty / whitespace env is treated as unset.
     """
-    env_backend = os.environ.get("LLM_BACKEND", "").strip().lower()
+    settings = env or EnvSettings()
+    raw = settings.llm_backend if settings.llm_backend is not None else os.environ.get(
+        "LLM_BACKEND", ""
+    )
+    env_backend = (raw or "").strip().lower()
     if env_backend in {"mock", "http"}:
         return env_backend
     name = (config_backend if config_backend is not None else load_config().llm.backend)
@@ -63,12 +68,16 @@ def create_llm_client(
     """
     settings = env or EnvSettings()
     cfg = load_config()
-    backend_name = resolve_llm_backend_name(config_backend=cfg.llm.backend)
+    backend_name = resolve_llm_backend_name(
+        config_backend=cfg.llm.backend, env=settings
+    )
     cfg_timeout = float(cfg.llm.timeout_seconds)
 
     timeout = float(timeout_s if timeout_s is not None else cfg_timeout)
     # Env override for tests / ops — LLM_BACKEND=mock always wins.
-    if os.environ.get("LLM_BACKEND", "").strip().lower() == "mock":
+    if (settings.llm_backend or os.environ.get("LLM_BACKEND", "")).strip().lower() == (
+        "mock"
+    ):
         force_mock = True
 
     if force_mock or backend_name == "mock":

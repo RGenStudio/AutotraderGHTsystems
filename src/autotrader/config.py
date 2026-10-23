@@ -8,8 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _blank_str_to_none(value: Any) -> Any:
+    """Treat empty / whitespace-only env strings as unset (None)."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parents[1]
@@ -140,6 +147,8 @@ class EnvSettings(BaseSettings):
     )
 
     mode: Mode | None = None
+    # Optional override for llm.backend (mock|http). Blank → unset → YAML/default.
+    llm_backend: str | None = None
     mt5_login: str | None = None
     mt5_password: str | None = None
     mt5_server: str | None = None
@@ -152,6 +161,19 @@ class EnvSettings(BaseSettings):
     llm_base_url: str | None = None
     news_calendar_url: str | None = None
     database_url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_env_strings_as_unset(cls, data: Any) -> Any:
+        """
+        ``MODE=`` / ``LLM_BACKEND=`` in ``.env.example`` must not ValidationError.
+
+        Empty or whitespace-only values are treated as unset so defaults apply
+        (``MODE`` → paper via YAML; ``LLM_BACKEND`` → YAML ``llm.backend`` / mock).
+        """
+        if not isinstance(data, dict):
+            return data
+        return {key: _blank_str_to_none(value) for key, value in data.items()}
 
 
 def load_yaml_config(path: Path | None = None) -> AppConfig:

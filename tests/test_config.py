@@ -61,6 +61,34 @@ def test_resolve_mode_defaults_to_paper(monkeypatch: pytest.MonkeyPatch) -> None
     assert resolve_mode() == Mode.PAPER
 
 
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_empty_mode_env_defaults_to_paper(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    """``MODE=`` in .env must not ValidationError — treat as unset → paper."""
+    monkeypatch.setenv("MODE", blank)
+    from autotrader.config import EnvSettings
+
+    settings = EnvSettings()
+    assert settings.mode is None
+    assert resolve_mode(env=settings) == Mode.PAPER
+    assert load_config().mode == Mode.PAPER
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_empty_llm_backend_env_is_unset(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    """``LLM_BACKEND=`` is unset so YAML/default mock applies."""
+    monkeypatch.setenv("LLM_BACKEND", blank)
+    from autotrader.config import EnvSettings
+    from autotrader.llm.factory import resolve_llm_backend_name
+
+    settings = EnvSettings()
+    assert settings.llm_backend is None
+    assert resolve_llm_backend_name(env=settings) == "mock"
+
+
 def test_env_mode_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MODE", "backtest")
     cfg = load_config()
