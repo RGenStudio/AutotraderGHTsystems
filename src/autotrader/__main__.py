@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from autotrader.config import Mode, load_config, require_non_live_mode
 from autotrader.db import resolve_database_url
 from autotrader.execution.factory import LiveModeForbiddenError
+from autotrader.llm.factory import resolve_llm_backend_name, should_force_mock_llm
 from autotrader.logging_setup import setup_logging
 from autotrader.orchestrator.cycle import build_orchestrator
 from autotrader.orchestrator.scheduler import SimpleIntervalScheduler
@@ -21,7 +22,8 @@ def _print_smoke(config) -> None:
     if config.mode == Mode.PAPER:
         print("execution=paper (no real MT5 order_send)")
     print(f"database={resolve_database_url()}")
-    print(f"llm_backend={config.llm.backend}")
+    # Effective backend (env LLM_BACKEND overrides YAML llm.backend).
+    print(f"llm_backend={resolve_llm_backend_name(config_backend=config.llm.backend)}")
     print(f"ab_mode={config.paper_ab.ab_mode.value}")
     tg = create_telegram_notifier()
     print(f"telegram={'enabled' if tg.enabled else 'disabled'}")
@@ -49,11 +51,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     setup_logging(**config.logging)
     _print_smoke(config)
 
-    # CI / default: mock data + mock LLM; Telegram from env when set (soft-fail).
+    # CI / default: mock data + mock LLM. Real LLM when llm.backend=http
+    # (or LLM_BACKEND=http) and API key + base URL are present.
+    # --mt5-data prefers MT5 candles on Windows with MT5_* creds.
     orch = build_orchestrator(
         config=config,
         force_mock_data=not args.mt5_data,
-        force_mock_llm=True,
+        force_mock_llm=should_force_mock_llm(config_backend=config.llm.backend),
         force_null_telegram=False,
     )
     orch.heartbeat.mark_up(message="cli_start")

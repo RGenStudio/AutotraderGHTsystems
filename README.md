@@ -41,12 +41,24 @@ On Linux, `create_market_data_provider()` automatically selects the **mock/fixtu
 
 All model calls go through **`LLMClient`** (HTTP wrapper + pydantic schema validation + timeout). CI uses `MockLLMBackend` — no real API keys.
 
-| Agent | Role | Model slot (config) |
-|---|---|---|
-| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` (cheap) |
-| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` (cheap) |
-| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` (mid) |
-| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` (stronger) |
+| Agent | Role | Model slot (config) | Default model id |
+|---|---|---|---|
+| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` (cheap) | `mock-cheap` |
+| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` (cheap) | `mock-cheap` |
+| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` (mid) | `mock-mid` |
+| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` (stronger) | `mock-strong` |
+
+### Enable real LLM (paper / Windows)
+
+Default is **mock** so CI needs no keys. For real HTTP calls (still **`MODE=paper`**):
+
+1. In local `.env`: set `LLM_BACKEND=http` **or** set `llm.backend: http` in `config/config.yaml`.
+2. Set at least one key: `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`.
+3. `LLM_BASE_URL` — optional for OpenAI (`https://api.openai.com/v1`) and DeepSeek (`https://api.deepseek.com`); required for other OpenAI-compatible gateways. Anthropic’s native API is **not** chat-completions compatible — use a compatible base URL if you pass an Anthropic key.
+4. Replace `llm.models.*` in `config.yaml` with real model ids (e.g. `gpt-4o-mini` / `gpt-4o`, or `deepseek-chat`). Leaving `mock-*` names against a real API will fail.
+5. Run: `python -m autotrader run --once` (add `--mt5-data` on Windows with `MT5_*` filled for live demo candles). Execution stays **paper** (no MT5 `order_send`).
+
+`LLM_BACKEND=mock` always forces mock. Missing key/base URL with `http` requested → soft fallback to mock (logged).
 
 ```python
 from datetime import UTC, datetime
@@ -90,13 +102,18 @@ One H1 cycle:
 Gates every cycle: **`MODE=paper`**, **kill switch**, **active_window** (no new entries outside). Heartbeat / engine up-down are written to `system_events`.
 
 ```bash
-# Single cycle (mock market data + mock LLM; Telegram optional from .env)
+# Single cycle (default: mock market data + mock LLM; Telegram optional from .env)
 python -m autotrader run --once
 python -m autotrader run --once --at 2026-10-14T15:00:00+00:00
+
+# Windows + Exness demo candles (still MODE=paper execution):
+python -m autotrader run --once --mt5-data
 
 # Scheduler hook (tests use a fake clock; production can loop with sleep)
 python -m autotrader run --loop --max-cycles 1
 ```
+
+There is **no** separate `forward-test` CLI. Closest ops path: **`MODE=paper`** + `run --once --mt5-data` (forward/demo candles) while orders stay on the paper execution backend.
 
 ```python
 from datetime import UTC, datetime, timedelta

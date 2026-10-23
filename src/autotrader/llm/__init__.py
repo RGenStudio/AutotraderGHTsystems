@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from autotrader.llm.client import LLMClient, LLMError, LLMResult
-from autotrader.llm.factory import create_llm_client
+from autotrader.llm.factory import (
+    create_llm_client,
+    resolve_llm_backend_name,
+    should_force_mock_llm,
+)
 from autotrader.llm.mock import MockLLMBackend
 from autotrader.llm.types import ChatMessage, LLMUsage
 
@@ -15,4 +19,6 @@ __all__ = [
     "LLMUsage",
     "MockLLMBackend",
     "create_llm_client",
+    "resolve_llm_backend_name",
+    "should_force_mock_llm",
 ]
