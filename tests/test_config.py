@@ -120,3 +120,65 @@ def test_missing_yaml_falls_back_to_paper_defaults(tmp_path: Path) -> None:
     cfg = load_yaml_config(missing)
     assert cfg.mode == Mode.PAPER
     assert cfg.risk.max_open_positions == 2
+
+
+def _isolate_dotenv_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_dotenv: bool
+) -> None:
+    """Point REPO_ROOT + cwd at tmp so real workspace .env cannot interfere."""
+    import autotrader.config as config_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_mod, "REPO_ROOT", tmp_path)
+    (tmp_path / ".env.example").write_text("MT5_LOGIN=\n", encoding="utf-8")
+    if with_dotenv:
+        (tmp_path / ".env").write_text("MT5_LOGIN=\n", encoding="utf-8")
+
+
+def test_warn_missing_dotenv_when_example_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No .env + .env.example present + no keys → clear copy hint."""
+    from autotrader.config import EnvSettings, maybe_warn_missing_dotenv
+
+    for key in (
+        "MT5_LOGIN",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    _isolate_dotenv_paths(tmp_path, monkeypatch, with_dotenv=False)
+
+    with caplog.at_level("WARNING", logger="autotrader.config"):
+        warned = maybe_warn_missing_dotenv(env=EnvSettings(_env_file=None))
+    assert warned is True
+    assert "No .env file found" in caplog.text
+    assert "copy .env.example .env" in caplog.text
+
+
+def test_no_warn_when_dotenv_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from autotrader.config import EnvSettings, maybe_warn_missing_dotenv
+
+    _isolate_dotenv_paths(tmp_path, monkeypatch, with_dotenv=True)
+
+    with caplog.at_level("WARNING", logger="autotrader.config"):
+        warned = maybe_warn_missing_dotenv(env=EnvSettings(_env_file=None))
+    assert warned is False
+    assert "No .env file found" not in caplog.text
+
+
+def test_no_warn_when_llm_key_in_process_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from autotrader.config import EnvSettings, maybe_warn_missing_dotenv
+
+    _isolate_dotenv_paths(tmp_path, monkeypatch, with_dotenv=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    with caplog.at_level("WARNING", logger="autotrader.config"):
+        warned = maybe_warn_missing_dotenv(env=EnvSettings(_env_file=None))
+    assert warned is False
+    assert "No .env file found" not in caplog.text

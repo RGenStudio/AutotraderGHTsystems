@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from enum import StrEnum
 from pathlib import Path
@@ -21,6 +22,8 @@ def _blank_str_to_none(value: Any) -> Any:
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parents[1]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
+
+logger = logging.getLogger(__name__)
 
 
 class Mode(StrEnum):
@@ -221,6 +224,49 @@ class EnvSettings(BaseSettings):
         if not isinstance(data, dict):
             return data
         return {key: _blank_str_to_none(value) for key, value in data.items()}
+
+
+def maybe_warn_missing_dotenv(env: EnvSettings | None = None) -> bool:
+    """
+    Log a clear warning when the local secrets file is missing.
+
+    Common Windows trap: edit ``.env.example`` (or never ``copy`` it) so
+    ``MT5_*`` / LLM / Telegram stay unset while the user thinks ``.env`` is filled.
+    Skips the warning when a ``.env`` exists under cwd or the repo root, when
+    ``.env.example`` is absent, or when MT5/LLM keys are already present in the
+    process environment.
+    """
+    dotenv_paths = (Path.cwd() / ".env", REPO_ROOT / ".env")
+    if any(path.is_file() for path in dotenv_paths):
+        return False
+    example = REPO_ROOT / ".env.example"
+    if not example.is_file():
+        return False
+
+    settings = env or EnvSettings()
+    has_mt5 = bool((settings.mt5_login or "").strip())
+    has_llm = any(
+        bool((value or "").strip())
+        for value in (
+            settings.openai_api_key,
+            settings.anthropic_api_key,
+            settings.deepseek_api_key,
+        )
+    )
+    if has_mt5 or has_llm:
+        return False
+
+    logger.warning(
+        "No .env file found (looked in cwd and repo root), but .env.example exists. "
+        "Secrets are not loaded from .env.example — copy it first, then fill values "
+        "locally:  copy .env.example .env   "
+        "(PowerShell: Copy-Item .env.example .env). "
+        "Needed keys: MT5_LOGIN/MT5_PASSWORD/MT5_SERVER, "
+        "DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY, "
+        "optional TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID. "
+        "Do not commit the filled .env."
+    )
+    return True
 
 
 def load_yaml_config(path: Path | None = None) -> AppConfig:
