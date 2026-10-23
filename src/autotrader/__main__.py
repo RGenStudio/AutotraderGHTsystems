@@ -6,7 +6,12 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-from autotrader.config import Mode, load_config, require_non_live_mode
+from autotrader.config import (
+    Mode,
+    load_config,
+    maybe_warn_missing_dotenv,
+    require_non_live_mode,
+)
 from autotrader.db import resolve_database_url
 from autotrader.execution.factory import LiveModeForbiddenError
 from autotrader.llm.factory import resolve_llm_backend_name, should_force_mock_llm
@@ -37,6 +42,7 @@ def cmd_smoke(_args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     setup_logging(**config.logging)
+    maybe_warn_missing_dotenv()
     _print_smoke(config)
     return 0
 
@@ -49,6 +55,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     setup_logging(**config.logging)
+    maybe_warn_missing_dotenv()
     _print_smoke(config)
 
     # CI / default: mock data + mock LLM. Real LLM when llm.backend=http
