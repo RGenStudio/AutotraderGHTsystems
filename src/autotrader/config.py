@@ -121,7 +121,12 @@ class NewsConfig(BaseModel):
 
 class AppConfig(BaseModel):
     mode: Mode = Mode.PAPER
+    # App-facing pair names. May be broker-native (e.g. Exness EURUSDm) or logical
+    # (EURUSD) with optional symbol_map → Market Watch wire name.
     symbols: list[str] = Field(default_factory=lambda: ["EURUSD", "USDJPY"])
+    # Optional logical → broker wire name (Exness often uses EURUSDm / USDJPYm).
+    # Values keep broker casing; keys are matched case-insensitively.
+    symbol_map: dict[str, str] = Field(default_factory=dict)
     timeframes: dict[str, str] = Field(
         default_factory=lambda: {"entry": "H1", "trend": "H4"}
     )

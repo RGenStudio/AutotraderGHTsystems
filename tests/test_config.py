@@ -23,8 +23,23 @@ def test_yaml_defaults_are_paper_and_locked_symbols() -> None:
     cfg = load_yaml_config()
     assert cfg.mode == Mode.PAPER
     assert cfg.symbols == ["EURUSD", "USDJPY"]
+    assert cfg.symbol_map == {}
     assert cfg.timeframes["entry"] == "H1"
     assert cfg.timeframes["trend"] == "H4"
+
+
+def test_symbol_map_loads_from_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "cfg.yaml"
+    path.write_text(
+        "mode: paper\n"
+        "symbols: [EURUSD, USDJPY]\n"
+        "symbol_map:\n"
+        "  EURUSD: EURUSDm\n"
+        "  USDJPY: USDJPYm\n",
+        encoding="utf-8",
+    )
+    cfg = load_yaml_config(path)
+    assert cfg.symbol_map == {"EURUSD": "EURUSDm", "USDJPY": "USDJPYm"}
 
 
 def test_risk_defaults_from_yaml() -> None:
