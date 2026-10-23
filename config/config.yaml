@@ -21,14 +21,15 @@ timeframes:
   entry: H1
   trend: H4
 
-# Active window for local pre-VPS runs (operator hours, London–NY overlap).
-# Outside this window: no new entries (see autotrader.active_window.is_within_active_window).
-# Inclusive start, exclusive end; weekdays only by default.
+# Active window — effectively 24h when the engine is up.
+# start 00:00 / end 24:00 (end-of-day sentinel) + weekdays_only=false → all UTC hours every day.
+# New entries may run whenever the engine process is running; kill switch / risk rules unchanged.
+# Narrow the window again here if you want operator-hours only.
 active_window:
   timezone: UTC
-  weekdays_only: true
-  start: "12:00"
-  end: "21:00"
+  weekdays_only: false
+  start: "00:00"
+  end: "24:00"
 
 risk:
   max_risk_per_trade_pct: 0.5
@@ -51,22 +52,30 @@ news:
     - EUR
     - JPY
 
-# LLMClient (M5). Default backend=mock so CI needs no API keys.
-# Keys / LLM_BASE_URL stay in local `.env` only.
-# Real LLM: set backend=http (or env LLM_BACKEND=http) + API key; replace model
-# ids below (examples: gpt-4o-mini / gpt-4o, or deepseek-chat). Keep MODE=paper.
+# LLMClient. Default backend=http with real model ids (Bartender: don't over-save on 3+4).
+# CI / no keys: create_llm_client soft-falls to mock. Force mock with LLM_BACKEND=mock.
+# Keys / LLM_BASE_URL stay in local `.env` only. Keep MODE=paper.
+# You may set all four models to gpt-4o if preferred (see ops doc).
 llm:
-  backend: mock  # mock | http
+  backend: http
   timeout_seconds: 30
   models:
-    technical: mock-cheap       # Agent 1 — cheap slot
-    news: mock-cheap            # Agent 2 — cheap slot
-    risk_manager: mock-mid      # Agent 3 — mid slot
-    decision_maker: mock-strong # Agent 4 — stronger slot
+    technical: gpt-4o-mini      # Agent1 filter — cheaper-capable
+    news: gpt-4o-mini           # Agent2
+    risk_manager: gpt-4o        # Agent3
+    decision_maker: gpt-4o      # Agent4 final
+
+# Best-effort API credit / balance alert → Telegram (orchestrator heartbeat / --loop).
+# Threshold also overridable via env API_CREDIT_WARN_USD. Optional manual OPENAI_CREDIT_USD.
+api_credit:
+  warn_usd: 1.0
+  cooldown_hours: 6
 
 # M8 paper A/B harness (synthetic/mock cycles — not a multi-week live paper run).
 # ab_mode: rules_only | rules_plus_ai | both
 # Gate pass does NOT enable MODE=live.
+# Sample size: min_closed_trades OR min_weeks (whichever comes first).
+# min_weeks=2 is weaker statistically than 12 — Bartender accepted.
 paper_ab:
   ab_mode: both
   cycles: 50
@@ -78,7 +87,7 @@ paper_ab:
   positive_bias: 0.55
   gates:
     min_closed_trades: 80
-    max_calendar_weeks: 12
+    min_weeks: 2
     max_drawdown_pct: 8.0
     min_net_return_pct: 0.0
     min_expectancy_r: 0.0

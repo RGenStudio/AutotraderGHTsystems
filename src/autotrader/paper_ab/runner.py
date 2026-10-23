@@ -273,14 +273,18 @@ def _arms_for_mode(mode: AbMode) -> list[ArmName]:
 
 
 def _ensure_weekday_window(now: datetime) -> datetime:
-    """Snap synthetic clocks into a weekday 12:00–21:00 UTC window for Risk Engine."""
+    """
+    Normalize synthetic clocks for Risk Engine.
+
+    Project default active_window is effectively 24h; still snap weekends to a
+    weekday mid-day so harnesses stay deterministic if an operator narrows the
+    window again.
+    """
     instant = now if now.tzinfo else now.replace(tzinfo=UTC)
     instant = instant.astimezone(UTC)
     if instant.weekday() >= 5:
         # Move to next Monday 15:00 UTC
         days = 7 - instant.weekday()
         instant = instant + timedelta(days=days)
-        instant = instant.replace(hour=15, minute=0, second=0, microsecond=0)
-    if instant.hour < 12 or instant.hour >= 21:
         instant = instant.replace(hour=15, minute=0, second=0, microsecond=0)
     return instant

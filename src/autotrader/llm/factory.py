@@ -34,7 +34,7 @@ def resolve_llm_backend_name(
     Resolve ``mock`` vs ``http``.
 
     Precedence: ``LLM_BACKEND`` env (``mock``|``http``) → YAML ``llm.backend``
-    → default ``mock``. Empty / whitespace env is treated as unset.
+    → default ``http``. Empty / whitespace env is treated as unset.
     """
     settings = env or EnvSettings()
     raw = settings.llm_backend if settings.llm_backend is not None else os.environ.get(
@@ -44,7 +44,7 @@ def resolve_llm_backend_name(
     if env_backend in {"mock", "http"}:
         return env_backend
     name = (config_backend if config_backend is not None else load_config().llm.backend)
-    return str(name).strip().lower() or "mock"
+    return str(name).strip().lower() or "http"
 
 
 def should_force_mock_llm(*, config_backend: str | None = None) -> bool:

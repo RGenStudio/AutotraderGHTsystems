@@ -208,7 +208,18 @@ def test_cycle_approve_inside_window(journal) -> None:
 
 
 def test_cycle_skips_outside_active_window(journal) -> None:
+    from autotrader.config import ActiveWindow
+
+    # Default window is 24h — use a narrow window to exercise the skip path.
     orch = _make_orch(journal, symbols=["EURUSD"])
+    orch.config = orch.config.model_copy(
+        update={
+            "active_window": ActiveWindow(
+                timezone="UTC", weekdays_only=True, start="12:00", end="21:00"
+            )
+        }
+    )
+    orch.risk.active_window = orch.config.active_window
     now = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)  # before 12:00
     result = orch.run_cycle(now=now)
     assert result.status == "skipped"

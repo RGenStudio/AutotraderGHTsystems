@@ -25,6 +25,7 @@ from autotrader.journal.persist import (
     persist_signal,
 )
 from autotrader.kill_switch import KillSwitch
+from autotrader.llm.credit_check import ApiCreditMonitor, create_api_credit_monitor
 from autotrader.orchestrator.heartbeat import HeartbeatRecorder
 from autotrader.risk import (
     CandidateOrder,
@@ -94,6 +95,7 @@ class Orchestrator:
         execution: ExecutionBackend,
         notifier: TelegramSender,
         heartbeat: HeartbeatRecorder | None = None,
+        credit_monitor: ApiCreditMonitor | None = None,
         clock: Callable[[], datetime] | None = None,
         equity: float = 10_000.0,
         bar_count: int = 250,
@@ -108,6 +110,7 @@ class Orchestrator:
         self.execution = execution
         self.notifier = notifier
         self.heartbeat = heartbeat or HeartbeatRecorder(journal, clock=clock)
+        self.credit_monitor = credit_monitor
         self._clock = clock or (lambda: datetime.now(UTC))
         self.equity = equity
         self.bar_count = bar_count
@@ -123,6 +126,9 @@ class Orchestrator:
             instant = instant.replace(tzinfo=UTC)
         else:
             instant = instant.astimezone(UTC)
+
+        # Best-effort API credit check (Telegram once per cooldown; soft-fail).
+        self._maybe_check_api_credit(instant)
 
         errors: list[str] = []
         try:
@@ -420,6 +426,37 @@ class Orchestrator:
             pipeline_reason=pipeline.reason,
         )
 
+    def _maybe_check_api_credit(self, instant: datetime) -> None:
+        """Heartbeat hook: best-effort credit probe; never hard-fails the cycle."""
+        if self.credit_monitor is None:
+            return
+        try:
+            outcome = self.credit_monitor.check_and_maybe_alert(now=instant)
+            if outcome.low or outcome.alerted:
+                self.journal.record_system_event(
+                    event_type="api_credit_check",
+                    message=(
+                        "api_credit_low_alert"
+                        if outcome.alerted
+                        else "api_credit_low"
+                    ),
+                    payload={
+                        "warn_usd": outcome.warn_usd,
+                        "alerted": outcome.alerted,
+                        "low": [
+                            {
+                                "provider": p.provider,
+                                "remaining_usd": p.remaining_usd,
+                                "source": p.source,
+                            }
+                            for p in outcome.low
+                        ],
+                    },
+                    created_at=instant,
+                )
+        except Exception as exc:  # noqa: BLE001 — soft-fail by design
+            logger.warning("API credit check failed (continuing cycle): %s", exc)
+
     def _soft_notify_approve(self, *, symbol: str, reason: str, detail: str = "") -> None:
         try:
             if hasattr(self.notifier, "notify_approve"):
@@ -529,6 +566,8 @@ def build_orchestrator(
     execution: ExecutionBackend | None = None,
     notifier: TelegramSender | None = None,
     kill_switch: KillSwitch | None = None,
+    credit_monitor: ApiCreditMonitor | None = None,
+    enable_credit_monitor: bool = True,
 ) -> Orchestrator:
     """
     Wire production defaults for paper/CI.
@@ -555,6 +594,9 @@ def build_orchestrator(
     exec_backend = execution or create_execution_backend(mode=cfg.mode)
     tg = notifier or create_telegram_notifier(force_null=force_null_telegram)
     hb = HeartbeatRecorder(j, clock=clock)
+    monitor = credit_monitor
+    if monitor is None and enable_credit_monitor:
+        monitor = create_api_credit_monitor(notifier=tg, config=cfg, clock=clock)
     return Orchestrator(
         config=cfg,
         journal=j,
@@ -565,6 +607,7 @@ def build_orchestrator(
         execution=exec_backend,
         notifier=tg,
         heartbeat=hb,
+        credit_monitor=monitor,
         clock=clock,
         equity=equity,
     )

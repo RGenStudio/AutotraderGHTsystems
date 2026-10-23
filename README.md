@@ -12,7 +12,7 @@ Canonical repo: [RGenStudio/AutotraderGHTsystems](https://github.com/RGenStudio/
 
 - Default **`MODE=paper`**. Do not enable `live` until §13 paper criteria pass and a human approves. The CLI / execution factory **refuse** `MODE=live`.
 - Risk Engine defaults (code): **0.5%** per trade · **2%** daily loss · **5%** weekly drawdown · **max 2** open positions (at most one per symbol).
-- **Active window (UTC):** weekdays **12:00–21:00** by default — outside the window the engine must **not** open new entries.
+- **Active window (UTC):** default **00:00–24:00 every day** (effectively 24h while the engine is up) — narrow `active_window` in config if you want operator-hours only. Outside a narrowed window the engine must **not** open new entries. Kill switch / risk rules are unchanged.
 - Bad Decision Maker JSON / LLM failure ≡ **do not trade**. Kill switch checked every Risk Engine cycle.
 - Strategy Engine creates **candidate entries in code only** — AI filters/sizes; it does not invent signals.
 - Agents propose only; **Risk Engine (code) is authority**. Agent 3 cannot raise risk ceilings.
@@ -43,23 +43,31 @@ All model calls go through **`LLMClient`** (HTTP wrapper + pydantic schema valid
 
 | Agent | Role | Model slot (config) | Default model id |
 |---|---|---|---|
-| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` (cheap) | `mock-cheap` |
-| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` (cheap) | `mock-cheap` |
-| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` (mid) | `mock-mid` |
-| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` (stronger) | `mock-strong` |
+| 1 Technical Analyst | Structure vs signal; **no** size/order | `llm.models.technical` | `gpt-4o-mini` |
+| 2 News | Calendar + high-impact **±30 min** no-trade flag | `llm.models.news` | `gpt-4o-mini` |
+| 3 Risk Manager | Propose size / SL / TP only | `llm.models.risk_manager` | `gpt-4o` |
+| 4 Decision Maker | Final JSON action; invalid schema ⇒ no trade | `llm.models.decision_maker` | `gpt-4o` |
+
+Default `llm.backend` is **`http`**. CI / no keys soft-falls to mock. You may set all four models to `gpt-4o` if preferred.
 
 ### Enable real LLM (paper / Windows)
 
-Default is **mock** so CI needs no keys. For real HTTP calls (still **`MODE=paper`**):
-
-1. In local `.env`: set `LLM_BACKEND=http` **or** set `llm.backend: http` in `config/config.yaml`.
-2. Set at least one key: `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`.
+1. Put at least one key in local `.env`: `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`.
+2. Optional: `LLM_BACKEND=http` (already the YAML default) or `LLM_BACKEND=mock` to force mock.
 3. `LLM_BASE_URL` — optional for OpenAI (`https://api.openai.com/v1`) and DeepSeek (`https://api.deepseek.com`); required for other OpenAI-compatible gateways. Anthropic’s native API is **not** chat-completions compatible — use a compatible base URL if you pass an Anthropic key.
-4. Replace `llm.models.*` in `config.yaml` with real model ids (e.g. `gpt-4o-mini` / `gpt-4o`, or `deepseek-chat`). Leaving `mock-*` names against a real API will fail.
+4. Model ids default to `gpt-4o-mini` / `gpt-4o` in `config.yaml` — change there if you use DeepSeek etc.
 5. Run: `python -m autotrader run --once` (add `--mt5-data` on Windows with `MT5_*` filled for live demo candles). Execution stays **paper** (no MT5 `order_send`).
 
 `LLM_BACKEND=mock` always forces mock. Missing key/base URL with `http` requested → soft fallback to mock (logged).
 
+### API credit low alert (Telegram)
+
+When the orchestrator runs (including `--loop`), it best-effort probes remaining provider credit. If remaining USD &lt; `API_CREDIT_WARN_USD` (default **1.0**), it sends Telegram **once per 6h cooldown**.
+
+- DeepSeek: `GET /user/balance` when `DEEPSEEK_API_KEY` is set.
+- OpenAI: tries known credit-grants endpoints; **most API keys cannot read prepaid balance** — set optional manual `OPENAI_CREDIT_USD` (update when you top up).
+- Anthropic: skipped (no simple remaining-balance API).
+- Never logs full API keys.
 ```python
 from datetime import UTC, datetime
 from autotrader.agents.pipeline import build_agent_pipeline
@@ -151,7 +159,7 @@ Config (`config/config.yaml` → `paper_ab`):
 |---|---|
 | `ab_mode` | `rules_only` \| `rules_plus_ai` \| `both` |
 | `cycles` | default `50` |
-| `gates.*` | §13 thresholds (80 trades or 12 weeks, DD≤8%, expectancy>0, bad-JSON≤3%, A/B DD/expectancy) |
+| `gates.*` | §13 thresholds (80 trades **or** 2 weeks, DD≤8%, expectancy>0, bad-JSON≤3%, A/B DD/expectancy). `min_weeks=2` is weaker statistically — Bartender accepted. |
 
 ```bash
 # Both arms, 50 synthetic cycles → markdown + JSON under reports/ (gitignored except examples/)
@@ -412,7 +420,7 @@ Or copy `config\config.yaml` aside, pull, then copy your symbols / `symbol_map` 
 
    With `MT5_LOGIN` set on Windows, the factory selects the **MetaTrader5** backend. Without credentials (or on Linux) it stays on the mock backend.
 
-6. Respect **operator hours**: configure `active_window` in `config/config.yaml` (default weekdays 12:00–21:00 UTC). Outside that window, do not open new entries. Prefer flat before shutdown. On engine start, run reconcile; clear kill switch only after human review if mismatched.
+6. Default `active_window` is **00:00–24:00 UTC every day** (new entries whenever the engine is up). Narrow it in `config/config.yaml` if you want operator-hours only. Prefer flat before shutdown. On engine start, run reconcile; clear kill switch only after human review if mismatched.
 
 See also project docs: local-run rules (pre-VPS) and project context in the Cursor project store.
 

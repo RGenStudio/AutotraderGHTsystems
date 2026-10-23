@@ -52,12 +52,16 @@ def test_risk_defaults_from_yaml() -> None:
 
 def test_llm_and_news_defaults_from_yaml() -> None:
     cfg = load_yaml_config()
-    assert cfg.llm.backend == "mock"
+    assert cfg.llm.backend == "http"
     assert cfg.llm.timeout_seconds == 30
-    assert cfg.llm.models.technical == "mock-cheap"
-    assert cfg.llm.models.decision_maker == "mock-strong"
+    assert cfg.llm.models.technical == "gpt-4o-mini"
+    assert cfg.llm.models.news == "gpt-4o-mini"
+    assert cfg.llm.models.risk_manager == "gpt-4o"
+    assert cfg.llm.models.decision_maker == "gpt-4o"
     assert cfg.news.blackout_minutes == 30
     assert "USD" in cfg.news.high_impact_currencies
+    assert cfg.api_credit.warn_usd == 1.0
+    assert cfg.api_credit.cooldown_hours == 6.0
 
 
 def test_paper_ab_defaults_from_yaml() -> None:
@@ -67,6 +71,7 @@ def test_paper_ab_defaults_from_yaml() -> None:
     assert cfg.paper_ab.ab_mode == AbMode.BOTH
     assert cfg.paper_ab.cycles == 50
     assert cfg.paper_ab.gates.min_closed_trades == 80
+    assert cfg.paper_ab.gates.min_weeks == 2
     assert cfg.paper_ab.gates.max_drawdown_pct == 8.0
     assert cfg.paper_ab.gates.max_bad_json_rate_pct == 3.0
 
@@ -94,14 +99,14 @@ def test_empty_mode_env_defaults_to_paper(
 def test_empty_llm_backend_env_is_unset(
     monkeypatch: pytest.MonkeyPatch, blank: str
 ) -> None:
-    """``LLM_BACKEND=`` is unset so YAML/default mock applies."""
+    """``LLM_BACKEND=`` is unset so YAML default (http) applies."""
     monkeypatch.setenv("LLM_BACKEND", blank)
     from autotrader.config import EnvSettings
     from autotrader.llm.factory import resolve_llm_backend_name
 
     settings = EnvSettings()
     assert settings.llm_backend is None
-    assert resolve_llm_backend_name(env=settings) == "mock"
+    assert resolve_llm_backend_name(env=settings) == "http"
 
 
 def test_env_mode_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
