@@ -118,8 +118,10 @@ python -m autotrader run --once --at 2026-10-14T15:00:00+00:00
 # Windows + Exness demo candles (still MODE=paper execution):
 python -m autotrader run --once --mt5-data
 
-# Scheduler hook (tests use a fake clock; production can loop with sleep)
-python -m autotrader run --loop --max-cycles 1
+# Continuous H1 loop (sleeps 1h between cycles; Ctrl+C to stop)
+python -m autotrader run --loop --mt5-data
+# Optional cap for smoke / CI (mock sleep in unit tests):
+python -m autotrader run --loop --max-cycles 3
 ```
 
 There is **no** separate `forward-test` CLI. Closest ops path: **`MODE=paper`** + `run --once --mt5-data` (forward/demo candles) while orders stay on the paper execution backend.

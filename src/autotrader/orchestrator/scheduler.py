@@ -99,10 +99,14 @@ class SimpleIntervalScheduler:
 
     def run_forever(self, *, max_cycles: int | None = None) -> list[CycleResult]:
         """
-        Loop with real/fake sleep until :meth:`stop` or ``max_cycles``.
+        Loop with real/fake sleep until :meth:`stop`, Ctrl+C, or ``max_cycles``.
 
         Prefer :meth:`run_until` in tests. ``max_cycles`` guards CI / smoke runs.
+        Production CLI passes ``time.sleep``; default ``sleep`` is a no-op for tests.
         """
+        if max_cycles is not None and max_cycles < 1:
+            raise ValueError("max_cycles must be >= 1 when set")
+
         if self.on_start is not None:
             self.on_start()
         self.orchestrator.heartbeat.mark_up(message="scheduler_start")
@@ -116,6 +120,9 @@ class SimpleIntervalScheduler:
                 if max_cycles is not None and cycles >= max_cycles:
                     break
                 self.sleep(self.interval.total_seconds())
+        except KeyboardInterrupt:
+            logger.info("scheduler interrupted (Ctrl+C) after %s cycle(s)", cycles)
+            self._running = False
         finally:
             self._running = False
             self.orchestrator.heartbeat.mark_down(message="scheduler_stop")

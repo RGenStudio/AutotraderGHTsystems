@@ -305,6 +305,22 @@ def test_scheduler_fake_clock(journal) -> None:
     assert ups and downs
 
 
+def test_scheduler_run_forever_max_cycles(journal) -> None:
+    """run_forever with max_cycles>1 must schedule more than one cycle (mock sleep)."""
+    orch = _make_orch(journal, symbols=["EURUSD"])
+    sleeps: list[float] = []
+    scheduler = SimpleIntervalScheduler(
+        orchestrator=orch,
+        interval=timedelta(hours=1),
+        sleep=lambda s: sleeps.append(s),
+    )
+    results = scheduler.run_forever(max_cycles=3)
+    assert len(results) == 3
+    assert len(sleeps) == 2
+    downs = journal.query_system_events(event_type=EVENT_ENGINE_DOWN)
+    assert downs and downs[-1].message == "scheduler_stop"
+
+
 def test_build_orchestrator_paper_mock(tmp_path: Path) -> None:
     journal = open_trade_journal(f"sqlite:///{tmp_path / 'build.db'}")
     orch = build_orchestrator(
