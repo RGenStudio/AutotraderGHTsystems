@@ -6,10 +6,12 @@ from autotrader.telegram.notifier import (
     NullTelegramNotifier,
     TelegramNotifier,
     create_telegram_notifier,
+    redact_telegram_secrets,
 )
 
 __all__ = [
     "NullTelegramNotifier",
     "TelegramNotifier",
     "create_telegram_notifier",
+    "redact_telegram_secrets",
 ]

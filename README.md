@@ -134,7 +134,7 @@ sched.run_until(
 orch.heartbeat.mark_down(message="engine stopped")
 ```
 
-**Telegram:** set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in local `.env` to enable alerts on **approve / reject / kill / errors**. Unset → no-op notifier (CI default). HTTP is mockable in tests; failures are logged and the cycle continues.
+**Telegram:** set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in local `.env` to enable alerts on **approve / reject / kill / errors**. Unset → no-op notifier (CI default). HTTP is mockable in tests; failures are logged and the cycle continues. Failed-send logs redact `bot<token>` from API URLs (never log the full token). If a token was ever logged or pasted in chat, **revoke it** with [@BotFather](https://t.me/BotFather) and put a new value in `.env`.
 
 ```env
 TELEGRAM_BOT_TOKEN=
@@ -353,8 +353,13 @@ The live MT5 **data** path only works on a **Windows** machine with the Exness M
    MT5_LOGIN=your_demo_login
    MT5_PASSWORD=your_demo_password
    MT5_SERVER=your_exness_demo_server
-   MT5_PATH=C:\Path\To\terminal64.exe
+   MT5_PATH=C:/Path/To/terminal64.exe
    ```
+
+   Prefer **forward slashes** in `MT5_PATH`. A Windows backslash before `terminal64`
+   (`...\MetaTrader 5\terminal64.exe`) can be mis-read as a tab escape (`\t`),
+   yielding a broken path like `...5erminal64.exe`. The adapter detects that pattern
+   and rewrites it, but setting `C:/.../terminal64.exe` avoids the footgun.
 
    Leave `MT5_PATH` empty if the terminal is already running and discoverable.
 

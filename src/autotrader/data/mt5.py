@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from autotrader.data.types import Candle, Timeframe
@@ -14,6 +16,37 @@ _TF_TO_MT5 = {
     Timeframe.H1: "TIMEFRAME_H1",
     Timeframe.H4: "TIMEFRAME_H4",
 }
+
+# ``MT5_PATH=...\MetaTrader 5\terminal64.exe`` — unquoted ``\t`` becomes a tab
+# (or is dropped), leaving ``...5erminal64.exe`` / ``...5<TAB>erminal64.exe``.
+_BROKEN_TERMINAL64 = re.compile(r"(?i)5[\t]?erminal64\.exe$")
+
+
+def normalize_mt5_path(path: str | None) -> str | None:
+    """
+    Expand and repair common ``MT5_PATH`` mis-parses from ``.env``.
+
+    Prefer forward slashes in ``.env`` (e.g. ``C:/Program Files/.../terminal64.exe``)
+    so parsers never treat ``\\t`` as a tab escape.
+    """
+    if path is None:
+        return None
+    raw = path.strip()
+    if not raw:
+        return None
+    fixed = raw
+    if _BROKEN_TERMINAL64.search(fixed):
+        # Forward slash avoids a second ``\t`` escape if the value is re-parsed.
+        repaired = _BROKEN_TERMINAL64.sub("5/terminal64.exe", fixed)
+        logger.warning(
+            "MT5_PATH looks mis-parsed (missing backslash before terminal64); "
+            "corrected %r → %r. Prefer forward slashes in .env, e.g. "
+            "MT5_PATH=C:/Path/To/terminal64.exe",
+            raw,
+            repaired,
+        )
+        fixed = repaired
+    return str(Path(fixed).expanduser())
 
 
 def mt5_package_available() -> bool:
@@ -46,7 +79,7 @@ class MT5MarketDataProvider:
         self._login = int(login) if login not in (None, "") else None
         self._password = password or None
         self._server = server or None
-        self._path = path or None
+        self._path = normalize_mt5_path(path)
         self._symbols = [s.upper() for s in (symbols or ["EURUSD", "USDJPY"])]
         self._mt5 = mt5_module
         self._initialized = False
@@ -70,8 +103,11 @@ class MT5MarketDataProvider:
             return
         mt5 = self._module()
         kwargs: dict[str, Any] = {}
-        if self._path:
-            kwargs["path"] = self._path
+        # Re-normalize in case path was set after construction (tests / hot reload).
+        path = normalize_mt5_path(self._path)
+        self._path = path
+        if path:
+            kwargs["path"] = path
         if self._login is not None:
             kwargs["login"] = self._login
         if self._password is not None:
