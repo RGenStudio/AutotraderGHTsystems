@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import UTC, datetime
+import time
+from datetime import UTC, datetime, timedelta
 
 from autotrader.config import (
     Mode,
@@ -20,6 +21,9 @@ from autotrader.orchestrator.cycle import build_orchestrator
 from autotrader.orchestrator.scheduler import SimpleIntervalScheduler
 from autotrader.paper_ab.cli import main as paper_ab_main
 from autotrader.telegram.notifier import create_telegram_notifier
+
+# H1 entry timeframe → default sleep between --loop cycles.
+_DEFAULT_LOOP_INTERVAL = timedelta(hours=1)
 
 
 def _print_smoke(config) -> None:
@@ -67,9 +71,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         force_mock_llm=should_force_mock_llm(config_backend=config.llm.backend),
         force_null_telegram=False,
     )
-    orch.heartbeat.mark_up(message="cli_start")
 
-    if args.once or not args.loop:
+    # Default (neither flag) and --once: single cycle. --loop: until Ctrl+C /
+    # --max-cycles. Previously --once defaulted to True, so `--loop` still hit
+    # the once path (cli_stop after one cycle).
+    if not args.loop:
+        orch.heartbeat.mark_up(message="cli_start")
         now = None
         if args.at:
             now = datetime.fromisoformat(args.at)
@@ -85,7 +92,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         orch.heartbeat.mark_down(message="cli_stop")
         return 0 if result.status in {"ok", "skipped"} else 1
 
-    scheduler = SimpleIntervalScheduler(orchestrator=orch)
+    scheduler = SimpleIntervalScheduler(
+        orchestrator=orch,
+        interval=_DEFAULT_LOOP_INTERVAL,
+        sleep=time.sleep,
+    )
     results = scheduler.run_forever(max_cycles=args.max_cycles)
     print(f"scheduler cycles={len(results)}")
     return 0
@@ -104,22 +115,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="Run orchestrator cycle(s)")
-    run_p.add_argument(
+    mode = run_p.add_mutually_exclusive_group()
+    mode.add_argument(
         "--once",
         action="store_true",
-        default=True,
-        help="Run a single H1 cycle (default)",
+        help="Run a single H1 cycle (default when --loop is omitted)",
     )
-    run_p.add_argument(
+    mode.add_argument(
         "--loop",
         action="store_true",
-        help="Run the interval scheduler (use with --max-cycles in tests)",
+        help="Keep running H1 cycles until Ctrl+C (or --max-cycles); sleep 1h between",
     )
     run_p.add_argument(
         "--max-cycles",
         type=int,
-        default=1,
-        help="Max cycles when --loop is set (default 1)",
+        default=None,
+        metavar="N",
+        help="When --loop is set, stop after N cycles (default: unlimited until Ctrl+C)",
     )
     run_p.add_argument(
         "--at",
