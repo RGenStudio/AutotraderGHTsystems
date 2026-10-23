@@ -338,11 +338,13 @@ The live MT5 **data** path only works on a **Windows** machine with the Exness M
 
 **Login ≠ rates.** A successful `MT5 initialize` / login only proves the terminal accepted credentials. `copy_rates_from_pos` can still return `None` with `(-1, 'Call failed')` when the symbol is not in Market Watch or the name does not match the broker (common on Exness). Treat those as separate failures.
 
-### Exness symbol suffixes
+### Exness symbol suffixes (exact casing)
 
-Exness often exposes pairs as `EURUSDm` / `USDJPYm` (and similar), not bare `EURUSD`. Before rates, the adapter calls `symbol_select(symbol, True)` and retries `copy_rates` once. Configure one of:
+Exness often exposes pairs as `EURUSDm` / `USDJPYm` (and similar), not bare `EURUSD`. **Casing is significant** — `EURUSDm` ≠ `EURUSDM`. The adapter keeps config spelling as-is (no `.upper()` on trading symbols), calls `symbol_select(symbol, True)`, and retries `copy_rates` once. Connect logs show the exact Market Watch names.
 
-1. **Broker-native `symbols`** — set Market Watch names in `config/config.yaml`:
+Configure one of:
+
+1. **Broker-native `symbols`** — set Market Watch names in `config/config.yaml` with **exact** broker casing:
 
    ```yaml
    symbols:
@@ -350,7 +352,7 @@ Exness often exposes pairs as `EURUSDm` / `USDJPYm` (and similar), not bare `EUR
      - USDJPYm
    ```
 
-2. **`symbol_map`** — keep logical app names and map to wire names:
+2. **`symbol_map`** — keep logical app names and map to wire names (values keep broker casing):
 
    ```yaml
    symbols:
@@ -361,7 +363,19 @@ Exness often exposes pairs as `EURUSDm` / `USDJPYm` (and similar), not bare `EUR
      USDJPY: USDJPYm
    ```
 
-If rates still fail, the error lists visible/matching symbols from `symbols_get` (names containing `EURUSD`, etc.) so you can copy the exact Market Watch spelling.
+If rates still fail, the error lists visible/matching symbols from `symbols_get` and calls out case mismatches when `symbol_select` fails (e.g. config `EURUSDM` vs broker `EURUSDm`).
+
+### Pull updates without losing local config
+
+Local `config/config.yaml` edits (Exness symbols, LLM models, etc.) can conflict with `git pull`. Before pulling on the Windows PC:
+
+```bat
+git stash push -u -m "local config" -- config
+git pull
+git stash pop
+```
+
+Or copy `config\config.yaml` aside, pull, then copy your symbols / `symbol_map` back. Keep `.env` local (never commit).
 
 1. Install **Exness MetaTrader 5** and log in to your **demo** account (EA/algo trading enabled). Prefer Standard MT5 demo, USD.
 2. Clone this repo on that Windows PC.

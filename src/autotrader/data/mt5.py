@@ -135,9 +135,9 @@ class MT5MarketDataProvider:
         raw_symbols = [s.strip() for s in (symbols or ["EURUSD", "USDJPY"]) if s.strip()]
         if not raw_symbols:
             raw_symbols = ["EURUSD", "USDJPY"]
-        # App-facing identity stays uppercase; wire names preserve broker casing
-        # (Exness ``EURUSDm``) via ``symbol_map`` or the original config spelling.
-        self._symbols = [s.upper() for s in raw_symbols]
+        # Keep broker-exact spelling from config (Exness ``EURUSDm`` ≠ ``EURUSDM``).
+        # Never ``.upper()`` trading symbols — MT5 Market Watch names are case-sensitive.
+        self._symbols = list(raw_symbols)
         self._wire_names: dict[str, str] = {}
         mapped = {
             str(k).strip().upper(): str(v).strip()
@@ -145,10 +145,13 @@ class MT5MarketDataProvider:
             if str(k).strip() and str(v).strip()
         }
         for orig in raw_symbols:
-            key = orig.upper()
-            self._wire_names[key] = mapped.get(key, orig)
+            # symbol_map keys match case-insensitively; values keep broker casing.
+            self._wire_names[orig] = mapped.get(orig.upper(), orig)
         self._mt5 = mt5_module
         self._initialized = False
+        # Last symbol_select outcome (for richer copy_rates errors).
+        self._last_select_ok: bool | None = None
+        self._last_select_wire: str | None = None
 
     def _module(self) -> Any:
         if self._mt5 is not None:
@@ -163,9 +166,26 @@ class MT5MarketDataProvider:
         self._mt5 = mt5
         return mt5
 
-    def _wire_symbol(self, symbol: str) -> str:
+    def _resolve_configured_symbol(self, symbol: str) -> str:
+        """
+        Return the configured spelling for ``symbol``.
+
+        Exact match wins; otherwise a single case-insensitive match maps back to
+        the config spelling so broker casing is never lost.
+        """
+        needle = symbol.strip()
+        if not needle:
+            raise KeyError("symbol not configured: empty")
+        if needle in self._symbols:
+            return needle
+        matches = [s for s in self._symbols if s.upper() == needle.upper()]
+        if len(matches) == 1:
+            return matches[0]
+        raise KeyError(f"symbol not configured: {symbol}")
+
+    def _wire_symbol(self, configured: str) -> str:
         """Broker-facing name for MT5 API calls (may differ from app symbol)."""
-        return self._wire_names.get(symbol.upper(), symbol)
+        return self._wire_names.get(configured, configured)
 
     def connect(self) -> None:
         """Initialize the MT5 terminal connection (idempotent)."""
@@ -189,8 +209,12 @@ class MT5MarketDataProvider:
             code, message = mt5.last_error()
             raise RuntimeError(f"MT5 initialize failed: {code} {message}")
         self._initialized = True
-        wire = ",".join(f"{s}->{self._wire_names[s]}" for s in self._symbols)
-        logger.info("MT5 connected (symbols=%s)", wire)
+        # Log exact broker names (and app→wire only when they differ).
+        parts: list[str] = []
+        for s in self._symbols:
+            wire = self._wire_names[s]
+            parts.append(f"{s}->{wire}" if wire != s else s)
+        logger.info("MT5 connected (symbols=%s)", ",".join(parts))
 
     def shutdown(self) -> None:
         if not self._initialized:
@@ -217,20 +241,48 @@ class MT5MarketDataProvider:
             return int(result[0]), str(result[1])
         return None
 
+    def _case_variant_matches(self, mt5: Any, wire_symbol: str) -> list[str]:
+        """Broker symbols that match ``wire_symbol`` ignoring case but differ in spelling."""
+        wire_u = wire_symbol.upper()
+        variants: list[str] = []
+        for name in matching_broker_symbols(mt5, wire_symbol):
+            if name.upper() == wire_u and name != wire_symbol:
+                variants.append(name)
+        # Also try the 6-char pair stem (EURUSDm → EURUSD) for near-misses.
+        if len(wire_symbol) > 6 and wire_symbol[:6].isalpha():
+            stem = wire_symbol[:6]
+            for name in matching_broker_symbols(mt5, stem):
+                if name.upper() == wire_u and name != wire_symbol and name not in variants:
+                    variants.append(name)
+        return variants
+
     def _ensure_symbol_selected(self, mt5: Any, wire_symbol: str) -> bool:
         """Add ``wire_symbol`` to Market Watch; required before ``copy_rates`` on many brokers."""
+        self._last_select_wire = wire_symbol
         try:
             ok = mt5.symbol_select(wire_symbol, True)
         except Exception as exc:  # noqa: BLE001 — surface as rates failure later
             logger.warning("MT5 symbol_select(%r) raised: %s", wire_symbol, exc)
+            self._last_select_ok = False
             return False
         if not ok:
             code_msg = self._clear_last_error(mt5)
-            logger.warning(
-                "MT5 symbol_select(%r) returned False (last_error=%s)",
-                wire_symbol,
-                code_msg,
-            )
+            case_hits = self._case_variant_matches(mt5, wire_symbol)
+            if case_hits:
+                logger.warning(
+                    "MT5 symbol_select(%r) returned False (last_error=%s); "
+                    "case-sensitive mismatch? broker has %s",
+                    wire_symbol,
+                    code_msg,
+                    case_hits,
+                )
+            else:
+                logger.warning(
+                    "MT5 symbol_select(%r) returned False (last_error=%s)",
+                    wire_symbol,
+                    code_msg,
+                )
+        self._last_select_ok = bool(ok)
         return bool(ok)
 
     def _copy_rates_error_message(
@@ -265,9 +317,23 @@ class MT5MarketDataProvider:
             f"{code} {message}.",
             "Login/initialize can succeed while rates fail — often the symbol is not "
             "in Market Watch or the broker uses a suffix (Exness: EURUSDm / USDJPYm).",
-            "Fix: set config symbols to Market Watch names, or use symbol_map "
-            "(e.g. EURUSD: EURUSDm), and ensure symbol_select succeeds.",
+            "Fix: set config symbols to Market Watch names with exact broker casing "
+            "(do not uppercase), or use symbol_map (e.g. EURUSD: EURUSDm), and ensure "
+            "symbol_select succeeds.",
         ]
+        select_failed = self._last_select_ok is False and self._last_select_wire == wire_symbol
+        case_hits = self._case_variant_matches(mt5, wire_symbol)
+        if select_failed and case_hits:
+            hint_parts.append(
+                f"symbol_select({wire_symbol!r}) failed — MT5 symbol names are "
+                f"case-sensitive; broker lists {case_hits} (e.g. EURUSDm ≠ EURUSDM). "
+                "Use the exact Market Watch spelling in config symbols / symbol_map."
+            )
+        elif select_failed:
+            hint_parts.append(
+                f"symbol_select({wire_symbol!r}) failed before copy_rates — confirm the "
+                "name is in Market Watch with exact casing."
+            )
         if matches:
             shown = ", ".join(matches[:25])
             hint_parts.append(f"Visible/matching symbols: {shown}.")
@@ -286,11 +352,8 @@ class MT5MarketDataProvider:
     ) -> list[Candle]:
         if count < 1:
             raise ValueError("count must be >= 1")
-        symbol = symbol.upper()
-        if symbol not in self._symbols:
-            raise KeyError(f"symbol not configured: {symbol}")
-
-        wire_symbol = self._wire_symbol(symbol)
+        configured = self._resolve_configured_symbol(symbol)
+        wire_symbol = self._wire_symbol(configured)
         self.connect()
         mt5 = self._module()
         tf_attr = _TF_TO_MT5[timeframe]
@@ -306,7 +369,7 @@ class MT5MarketDataProvider:
             # Retry once: re-select, clear error, copy again (common Exness footgun).
             logger.warning(
                 "MT5 copy_rates empty/None for %s (wire=%s); re-selecting and retrying once",
-                symbol,
+                configured,
                 wire_symbol,
             )
             self._ensure_symbol_selected(mt5, wire_symbol)
@@ -318,7 +381,7 @@ class MT5MarketDataProvider:
             raise RuntimeError(
                 self._copy_rates_error_message(
                     mt5,
-                    app_symbol=symbol,
+                    app_symbol=configured,
                     wire_symbol=wire_symbol,
                     timeframe=timeframe,
                     code=code,
@@ -332,7 +395,7 @@ class MT5MarketDataProvider:
             bar_time = datetime.fromtimestamp(int(row["time"]), tz=UTC)
             candles.append(
                 Candle(
-                    symbol=symbol,
+                    symbol=configured,
                     timeframe=timeframe,
                     time=bar_time,
                     open=float(row["open"]),
